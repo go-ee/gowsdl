@@ -7,9 +7,11 @@ import (
 	"encoding/xml"
 	"fmt"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/sbabiv/xml2map"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -415,7 +417,7 @@ func (s *Client) CallWithFaultDetail(soapAction string, request, response interf
 }
 
 func (s *Client) call(ctx context.Context, soapAction string, request, response interface{}, faultDetail FaultError,
-	retAttachments *[]MIMEMultipartAttachment, headers map[string]string) error {
+	retAttachments *[]MIMEMultipartAttachment, headers map[string]string) (err error) {
 	// SOAP envelope capable of namespace prefixes
 	envelope := SOAPEnvelope{
 		XmlNS: XmlNsSoapEnv,
@@ -440,17 +442,17 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 		encoder = xml.NewEncoder(buffer)
 	}
 
-	if err := encoder.Encode(envelope); err != nil {
-		return err
+	if err = encoder.Encode(envelope); err != nil {
+		return
 	}
 
-	if err := encoder.Flush(); err != nil {
-		return err
+	if err = encoder.Flush(); err != nil {
+		return
 	}
 
-	req, err := http.NewRequest("POST", s.url, buffer)
-	if err != nil {
-		return err
+	var req *http.Request
+	if req, err = http.NewRequest("POST", s.url, buffer); err != nil {
+		return
 	}
 	if s.opts.auth != nil {
 		req.SetBasicAuth(s.opts.auth.Login, s.opts.auth.Password)
@@ -492,9 +494,9 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 		client = &http.Client{Timeout: s.opts.contimeout, Transport: tr}
 	}
 
-	res, err := client.Do(req)
-	if err != nil {
-		return err
+	var res *http.Response
+	if res, err = client.Do(req); err != nil {
+		return
 	}
 	defer res.Body.Close()
 
@@ -505,6 +507,10 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 		spew.Dump("SOAP Response: ", res)
 		fmt.Printf("Response.Body: %v", buf.String())
 		bodyReader = io.NopCloser(bytes.NewReader(buf.Bytes()))
+
+		decoder := xml2map.NewDecoder(strings.NewReader(buf.String()))
+		responseMap, mapErr := decoder.Decode()
+		fmt.Printf("response: %v, err: %v", responseMap, mapErr)
 	}
 
 	// xml Decoder (used with and without MTOM) cannot handle namespace prefixes (yet),
@@ -517,16 +523,16 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 		},
 	}
 
-	mtomBoundary, err := getMtomHeader(res.Header.Get("Content-Type"))
-	if err != nil {
-		return err
+	var mtomBoundary string
+	contentType := res.Header.Get("Content-Type")
+	if mtomBoundary, err = getMtomHeader(contentType); err != nil {
+		return
 	}
 
 	var mmaBoundary string
 	if s.opts.mma {
-		mmaBoundary, err = getMmaHeader(res.Header.Get("Content-Type"))
-		if err != nil {
-			return err
+		if mmaBoundary, err = getMmaHeader(contentType); err != nil {
+			return
 		}
 	}
 
@@ -539,7 +545,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 		dec = xml.NewDecoder(bodyReader)
 	}
 
-	if err := dec.Decode(respEnvelope); err != nil {
+	if err = dec.Decode(respEnvelope); err != nil {
 		return err
 	}
 
