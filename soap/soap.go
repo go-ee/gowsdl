@@ -6,11 +6,14 @@ import (
 	"crypto/tls"
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
+	"github.com/davecgh/go-spew/spew"
+	"io"
 	"net"
 	"net/http"
 	"time"
 )
+
+var DebugResponse bool = false
 
 type SOAPEncoder interface {
 	Encode(v interface{}) error
@@ -379,40 +382,40 @@ func (s *Client) SetHeaders(headers ...interface{}) {
 }
 
 // CallContext performs HTTP POST request with a context
-func (s *Client) CallContext(ctx context.Context, soapAction string, request, response interface{}) error {
-	return s.call(ctx, soapAction, request, response, nil, nil)
+func (s *Client) CallContext(ctx context.Context, soapAction string, request, response interface{}, headers map[string]string) error {
+	return s.call(ctx, soapAction, request, response, nil, nil, headers)
 }
 
 // Call performs HTTP POST request.
 // Note that if the server returns a status code >= 400, a HTTPError will be returned
-func (s *Client) Call(soapAction string, request, response interface{}) error {
-	return s.call(context.Background(), soapAction, request, response, nil, nil)
+func (s *Client) Call(soapAction string, request, response interface{}, headers map[string]string) error {
+	return s.call(context.Background(), soapAction, request, response, nil, nil, headers)
 }
 
 // CallContextWithAttachmentsAndFaultDetail performs HTTP POST request.
 // Note that if SOAP fault is returned, it will be stored in the error.
 // On top the attachments array will be filled with attachments returned from the SOAP request.
 func (s *Client) CallContextWithAttachmentsAndFaultDetail(ctx context.Context, soapAction string, request,
-	response interface{}, faultDetail FaultError, attachments *[]MIMEMultipartAttachment) error {
-	return s.call(ctx, soapAction, request, response, faultDetail, attachments)
+	response interface{}, faultDetail FaultError, attachments *[]MIMEMultipartAttachment, headers map[string]string) error {
+	return s.call(ctx, soapAction, request, response, faultDetail, attachments, headers)
 }
 
 // CallContextWithFault performs HTTP POST request.
 // Note that if SOAP fault is returned, it will be stored in the error.
-func (s *Client) CallContextWithFaultDetail(ctx context.Context, soapAction string, request, response interface{}, faultDetail FaultError) error {
-	return s.call(ctx, soapAction, request, response, faultDetail, nil)
+func (s *Client) CallContextWithFaultDetail(ctx context.Context, soapAction string, request, response interface{}, faultDetail FaultError, headers map[string]string) error {
+	return s.call(ctx, soapAction, request, response, faultDetail, nil, headers)
 }
 
 // CallWithFaultDetail performs HTTP POST request.
 // Note that if SOAP fault is returned, it will be stored in the error.
 // the passed in fault detail is expected to implement FaultError interface,
 // which allows to condense the detail into a short error message.
-func (s *Client) CallWithFaultDetail(soapAction string, request, response interface{}, faultDetail FaultError) error {
-	return s.call(context.Background(), soapAction, request, response, faultDetail, nil)
+func (s *Client) CallWithFaultDetail(soapAction string, request, response interface{}, faultDetail FaultError, headers map[string]string) error {
+	return s.call(context.Background(), soapAction, request, response, faultDetail, nil, headers)
 }
 
 func (s *Client) call(ctx context.Context, soapAction string, request, response interface{}, faultDetail FaultError,
-	retAttachments *[]MIMEMultipartAttachment) error {
+	retAttachments *[]MIMEMultipartAttachment, headers map[string]string) error {
 	// SOAP envelope capable of namespace prefixes
 	envelope := SOAPEnvelope{
 		XmlNS: XmlNsSoapEnv,
@@ -469,6 +472,11 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 			req.Header.Set(k, v)
 		}
 	}
+
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
 	req.Close = true
 
 	client := s.opts.client
@@ -490,12 +498,13 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode >= 400 {
-		body, _ := ioutil.ReadAll(res.Body)
-		return &HTTPError{
-			StatusCode:   res.StatusCode,
-			ResponseBody: body,
-		}
+	bodyReader := res.Body
+	if DebugResponse {
+		buf := new(bytes.Buffer)
+		_, err = buf.ReadFrom(bodyReader)
+		spew.Dump("SOAP Response: ", res)
+		fmt.Printf("Response.Body: %v", buf.String())
+		bodyReader = io.NopCloser(bytes.NewReader(buf.Bytes()))
 	}
 
 	// xml Decoder (used with and without MTOM) cannot handle namespace prefixes (yet),
@@ -514,7 +523,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 	}
 
 	var mmaBoundary string
-	if s.opts.mma{
+	if s.opts.mma {
 		mmaBoundary, err = getMmaHeader(res.Header.Get("Content-Type"))
 		if err != nil {
 			return err
@@ -523,11 +532,11 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 
 	var dec SOAPDecoder
 	if mtomBoundary != "" {
-		dec = newMtomDecoder(res.Body, mtomBoundary)
+		dec = newMtomDecoder(bodyReader, mtomBoundary)
 	} else if mmaBoundary != "" {
-		dec = newMmaDecoder(res.Body, mmaBoundary)
+		dec = newMmaDecoder(bodyReader, mmaBoundary)
 	} else {
-		dec = xml.NewDecoder(res.Body)
+		dec = xml.NewDecoder(bodyReader)
 	}
 
 	if err := dec.Decode(respEnvelope); err != nil {

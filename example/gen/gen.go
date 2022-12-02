@@ -39,7 +39,7 @@ func NewStockQuotePortType(client *soap.Client) StockQuotePortType {
 
 func (service *stockQuotePortType) GetLastTradePrice(request *TradePriceRequest) (*TradePrice, error) {
 	response := new(TradePrice)
-	err := service.client.Call("http://example.com/GetLastTradePrice", request, response)
+	err := service.client.Call("http://example.com/GetLastTradePrice", request, response, nil)
 	if err != nil {
 		return nil, err
 	}
