@@ -419,9 +419,9 @@ func (s *Client) Call(soapAction string, request interface{}, responseHeader map
 // CallContextWithAttachmentsAndFaultDetail performs HTTP POST request.
 // Note that if SOAP fault is returned, it will be stored in the error.
 // On top the attachments array will be filled with attachments returned from the SOAP request.
-func (s *Client) CallContextWithAttachmentsAndFaultDetail(
-	ctx context.Context, soapAction string, request, responseHeader map[string]interface{}, responseContent interface{},
-	faultDetail FaultError, attachments *[]MIMEMultipartAttachment, headers map[string]string) error {
+func (s *Client) CallContextWithAttachmentsAndFaultDetail(ctx context.Context, soapAction string, request interface{},
+	responseHeader map[string]interface{}, responseContent interface{}, faultDetail FaultError,
+	attachments *[]MIMEMultipartAttachment, headers map[string]string) error {
 	return s.call(ctx, soapAction, request, responseHeader, responseContent, faultDetail, attachments, headers)
 }
 
@@ -436,7 +436,7 @@ func (s *Client) CallContextWithFaultDetail(ctx context.Context, soapAction stri
 // Note that if SOAP fault is returned, it will be stored in the error.
 // the passed in fault detail is expected to implement FaultError interface,
 // which allows to condense the detail into a short error message.
-func (s *Client) CallWithFaultDetail(soapAction string, request,
+func (s *Client) CallWithFaultDetail(soapAction string, request interface{},
 	responseHeader map[string]interface{}, responseContent interface{}, faultDetail FaultError, headers map[string]string) error {
 	return s.call(context.Background(), soapAction, request, responseHeader, responseContent, faultDetail, nil, headers)
 }
