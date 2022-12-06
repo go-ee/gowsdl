@@ -16,7 +16,7 @@ func client() {
 	service := gen.NewMNBArfolyamServiceType(client)
 	resp, err := service.GetInfoSoap(&gen.GetInfo{
 		Id: "shenfuqiang",
-	}, nil)
+	}, nil, nil)
 	fmt.Println(resp.GetInfoResult, err)
 	done <- struct{}{}
 }

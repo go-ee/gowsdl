@@ -36,6 +36,27 @@ type GetInfoResponse struct {
 	GetInfoResult string `xml:"GetInfoResult,omitempty" json:"GetInfoResult,omitempty"`
 }
 
+type ElementWithLocalSimpleType string
+
+const (
+
+	// First enum value
+	ElementWithLocalSimpleTypeEnum1 ElementWithLocalSimpleType = "enum1"
+
+	// Second enum value
+	ElementWithLocalSimpleTypeEnum2 ElementWithLocalSimpleType = "enum2"
+)
+
+type StartDate soap.XSDDateTime
+
+func (xdt StartDate) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	return soap.XSDDateTime(xdt).MarshalXML(e, start)
+}
+
+func (xdt *StartDate) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	return (*soap.XSDDateTime)(xdt).UnmarshalXML(d, start)
+}
+
 type ResponseStatus struct {
 	Status []struct {
 		Value string `xml:",chardata" json:"-,"`
@@ -47,24 +68,24 @@ type ResponseStatus struct {
 }
 
 type MNBArfolyamServiceType interface {
-	GetInfoSoap(request *GetInfo, headers map[string]string) (*GetInfoResponse, error)
+	GetInfoSoap(request *GetInfo, responseHeader map[string]interface{}, headers map[string]string) (*GetInfoResponse, error)
 
-	GetInfoSoapContext(ctx context.Context, request *GetInfo, headers map[string]string) (*GetInfoResponse, error)
+	GetInfoSoapContext(ctx context.Context, request *GetInfo, responseHeader map[string]interface{}, headers map[string]string) (*GetInfoResponse, error)
 }
 
 type mNBArfolyamServiceType struct {
-	client *soap.Client
+	Client *soap.Client
 }
 
 func NewMNBArfolyamServiceType(client *soap.Client) MNBArfolyamServiceType {
 	return &mNBArfolyamServiceType{
-		client: client,
+		Client: client,
 	}
 }
 
-func (service *mNBArfolyamServiceType) GetInfoSoapContext(ctx context.Context, request *GetInfo, headers map[string]string) (*GetInfoResponse, error) {
+func (service *mNBArfolyamServiceType) GetInfoSoapContext(ctx context.Context, request *GetInfo, responseHeader map[string]interface{}, headers map[string]string) (*GetInfoResponse, error) {
 	response := new(GetInfoResponse)
-	err := service.client.CallContext(ctx, "''", request, response, headers)
+	err := service.Client.CallContext(ctx, "''", request, responseHeader, response, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -72,10 +93,11 @@ func (service *mNBArfolyamServiceType) GetInfoSoapContext(ctx context.Context, r
 	return response, nil
 }
 
-func (service *mNBArfolyamServiceType) GetInfoSoap(request *GetInfo, headers map[string]string) (*GetInfoResponse, error) {
+func (service *mNBArfolyamServiceType) GetInfoSoap(request *GetInfo, responseHeader map[string]interface{}, headers map[string]string) (*GetInfoResponse, error) {
 	return service.GetInfoSoapContext(
 		context.Background(),
 		request,
+		responseHeader,
 		headers,
 	)
 }

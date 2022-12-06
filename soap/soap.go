@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-var DebugResponse bool = false
-
 type SOAPEncoder interface {
 	Encode(v interface{}) error
 	Flush() error
@@ -26,33 +24,52 @@ type SOAPDecoder interface {
 	Decode(v interface{}) error
 }
 
-type SOAPEnvelopeResponse struct {
+type EnvelopeResponse struct {
 	XMLName     xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Envelope"`
-	Header      *SOAPHeaderResponse
-	Body        SOAPBodyResponse
+	Header      *HeaderResponse
+	Body        BodyResponse
 	Attachments []MIMEMultipartAttachment `xml:"attachments,omitempty"`
 }
 
-type SOAPEnvelope struct {
+type Envelope struct {
 	XMLName xml.Name `xml:"soap:Envelope"`
 	XmlNS   string   `xml:"xmlns:soap,attr"`
 
-	Header *SOAPHeader
-	Body   SOAPBody
+	Header *Header
+	Body   Body
 }
 
-type SOAPHeader struct {
+type Header struct {
 	XMLName xml.Name `xml:"soap:Header"`
-
 	Headers []interface{}
 }
-type SOAPHeaderResponse struct {
+type HeaderResponse struct {
 	XMLName xml.Name `xml:"Header"`
-
-	Headers []interface{}
+	Headers Headers  `xml:",any"`
 }
 
-type SOAPBody struct {
+type Headers map[string]interface{}
+
+type HeaderPart struct {
+	XMLName xml.Name
+	Content string `xml:",chardata"`
+}
+
+func (o *Headers) UnmarshalXML(d *xml.Decoder, start xml.StartElement) (err error) {
+	if *o == nil {
+		*o = Headers{}
+	}
+
+	e := HeaderPart{}
+	if err = d.DecodeElement(&e, &start); err != nil {
+		return
+	}
+
+	(*o)[e.XMLName.Local] = e.Content
+	return
+}
+
+type Body struct {
 	XMLName xml.Name `xml:"soap:Body"`
 
 	Content interface{} `xml:",omitempty"`
@@ -61,10 +78,10 @@ type SOAPBody struct {
 	// we cannot simply store SOAPFault as a pointer to indicate this, since
 	// fault is initialized to non-nil with user-provided detail type.
 	faultOccurred bool
-	Fault         *SOAPFault `xml:",omitempty"`
+	Fault         *Fault `xml:",omitempty"`
 }
 
-type SOAPBodyResponse struct {
+type BodyResponse struct {
 	XMLName xml.Name `xml:"Body"`
 
 	Content interface{} `xml:",omitempty"`
@@ -73,7 +90,7 @@ type SOAPBodyResponse struct {
 	// we cannot simply store SOAPFault as a pointer to indicate this, since
 	// fault is initialized to non-nil with user-provided detail type.
 	faultOccurred bool
-	Fault         *SOAPFault `xml:",omitempty"`
+	Fault         *Fault `xml:",omitempty"`
 }
 
 type MIMEMultipartAttachment struct {
@@ -82,7 +99,7 @@ type MIMEMultipartAttachment struct {
 }
 
 // UnmarshalXML unmarshals SOAPBody xml
-func (b *SOAPBodyResponse) UnmarshalXML(d *xml.Decoder, _ xml.StartElement) error {
+func (b *BodyResponse) UnmarshalXML(d *xml.Decoder, _ xml.StartElement) error {
 	if b.Content == nil {
 		return xml.UnmarshalError("Content must be a pointer to a struct")
 	}
@@ -132,7 +149,7 @@ Loop:
 	return nil
 }
 
-func (b *SOAPBody) ErrorFromFault() error {
+func (b *Body) ErrorFromFault() error {
 	if b.faultOccurred {
 		return b.Fault
 	}
@@ -140,7 +157,7 @@ func (b *SOAPBody) ErrorFromFault() error {
 	return nil
 }
 
-func (b *SOAPBodyResponse) ErrorFromFault() error {
+func (b *BodyResponse) ErrorFromFault() error {
 	if b.faultOccurred {
 		return b.Fault
 	}
@@ -162,7 +179,7 @@ type FaultError interface {
 	HasData() bool
 }
 
-type SOAPFault struct {
+type Fault struct {
 	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Fault"`
 
 	Code   string     `xml:"faultcode,omitempty"`
@@ -171,7 +188,7 @@ type SOAPFault struct {
 	Detail FaultError `xml:"detail,omitempty"`
 }
 
-func (f *SOAPFault) Error() string {
+func (f *Fault) Error() string {
 	if f.Detail != nil && f.Detail.HasData() {
 		return f.Detail.ErrorString()
 	}
@@ -258,12 +275,14 @@ type options struct {
 	httpHeaders      map[string]string
 	mtom             bool
 	mma              bool
+	userAgent        string
 }
 
 var defaultOptions = options{
 	timeout:          time.Duration(30 * time.Second),
 	contimeout:       time.Duration(90 * time.Second),
 	tlshshaketimeout: time.Duration(15 * time.Second),
+	userAgent:        "gowsdl/0.1",
 }
 
 // A Option sets options such as credentials, tls, etc.
@@ -341,10 +360,11 @@ func WithMIMEMultipartAttachments() Option {
 
 // Client is soap client
 type Client struct {
-	url         string
-	opts        *options
-	headers     []interface{}
-	attachments []MIMEMultipartAttachment
+	url           string
+	opts          *options
+	headers       []interface{}
+	debugResponse bool
+	attachments   []MIMEMultipartAttachment
 }
 
 // HTTPClient is a client which can make HTTP requests
@@ -384,47 +404,53 @@ func (s *Client) SetHeaders(headers ...interface{}) {
 }
 
 // CallContext performs HTTP POST request with a context
-func (s *Client) CallContext(ctx context.Context, soapAction string, request, response interface{}, headers map[string]string) error {
-	return s.call(ctx, soapAction, request, response, nil, nil, headers)
+func (s *Client) CallContext(ctx context.Context, soapAction string, request interface{}, responseHeader map[string]interface{},
+	responseContent interface{}, headers map[string]string) error {
+	return s.call(ctx, soapAction, request, responseHeader, responseContent, nil, nil, headers)
 }
 
 // Call performs HTTP POST request.
 // Note that if the server returns a status code >= 400, a HTTPError will be returned
-func (s *Client) Call(soapAction string, request, response interface{}, headers map[string]string) error {
-	return s.call(context.Background(), soapAction, request, response, nil, nil, headers)
+func (s *Client) Call(soapAction string, request interface{}, responseHeader map[string]interface{}, responseContent interface{},
+	headers map[string]string) error {
+	return s.call(context.Background(), soapAction, request, responseHeader, responseContent, nil, nil, headers)
 }
 
 // CallContextWithAttachmentsAndFaultDetail performs HTTP POST request.
 // Note that if SOAP fault is returned, it will be stored in the error.
 // On top the attachments array will be filled with attachments returned from the SOAP request.
-func (s *Client) CallContextWithAttachmentsAndFaultDetail(ctx context.Context, soapAction string, request,
-	response interface{}, faultDetail FaultError, attachments *[]MIMEMultipartAttachment, headers map[string]string) error {
-	return s.call(ctx, soapAction, request, response, faultDetail, attachments, headers)
+func (s *Client) CallContextWithAttachmentsAndFaultDetail(
+	ctx context.Context, soapAction string, request, responseHeader map[string]interface{}, responseContent interface{},
+	faultDetail FaultError, attachments *[]MIMEMultipartAttachment, headers map[string]string) error {
+	return s.call(ctx, soapAction, request, responseHeader, responseContent, faultDetail, attachments, headers)
 }
 
 // CallContextWithFault performs HTTP POST request.
 // Note that if SOAP fault is returned, it will be stored in the error.
-func (s *Client) CallContextWithFaultDetail(ctx context.Context, soapAction string, request, response interface{}, faultDetail FaultError, headers map[string]string) error {
-	return s.call(ctx, soapAction, request, response, faultDetail, nil, headers)
+func (s *Client) CallContextWithFaultDetail(ctx context.Context, soapAction string, request,
+	responseHeader map[string]interface{}, responseContent interface{}, faultDetail FaultError, headers map[string]string) error {
+	return s.call(ctx, soapAction, request, responseHeader, responseContent, faultDetail, nil, headers)
 }
 
 // CallWithFaultDetail performs HTTP POST request.
 // Note that if SOAP fault is returned, it will be stored in the error.
 // the passed in fault detail is expected to implement FaultError interface,
 // which allows to condense the detail into a short error message.
-func (s *Client) CallWithFaultDetail(soapAction string, request, response interface{}, faultDetail FaultError, headers map[string]string) error {
-	return s.call(context.Background(), soapAction, request, response, faultDetail, nil, headers)
+func (s *Client) CallWithFaultDetail(soapAction string, request,
+	responseHeader map[string]interface{}, responseContent interface{}, faultDetail FaultError, headers map[string]string) error {
+	return s.call(context.Background(), soapAction, request, responseHeader, responseContent, faultDetail, nil, headers)
 }
 
-func (s *Client) call(ctx context.Context, soapAction string, request, response interface{}, faultDetail FaultError,
-	retAttachments *[]MIMEMultipartAttachment, headers map[string]string) (err error) {
+func (s *Client) call(ctx context.Context, soapAction string, request interface{}, responseHeader map[string]interface{},
+	responseContent interface{}, faultDetail FaultError, retAttachments *[]MIMEMultipartAttachment, headers map[string]string) (err error) {
+
 	// SOAP envelope capable of namespace prefixes
-	envelope := SOAPEnvelope{
+	envelope := Envelope{
 		XmlNS: XmlNsSoapEnv,
 	}
 
 	if s.headers != nil && len(s.headers) > 0 {
-		envelope.Header = &SOAPHeader{
+		envelope.Header = &Header{
 			Headers: s.headers,
 		}
 	}
@@ -468,7 +494,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 		req.Header.Add("Content-Type", "text/xml; charset=\"utf-8\"")
 	}
 	req.Header.Add("SOAPAction", soapAction)
-	req.Header.Set("User-Agent", "gowsdl/0.1")
+	req.Header.Set("User-Agent", s.opts.userAgent)
 	if s.opts.httpHeaders != nil {
 		for k, v := range s.opts.httpHeaders {
 			req.Header.Set(k, v)
@@ -501,24 +527,28 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 	defer res.Body.Close()
 
 	bodyReader := res.Body
-	if DebugResponse {
+	if s.debugResponse {
 		buf := new(bytes.Buffer)
 		_, err = buf.ReadFrom(bodyReader)
 		spew.Dump("SOAP Response: ", res)
 		fmt.Printf("Response.Body: %v", buf.String())
 		bodyReader = io.NopCloser(bytes.NewReader(buf.Bytes()))
 
-		decoder := xml2map.NewDecoder(strings.NewReader(buf.String()))
-		responseMap, mapErr := decoder.Decode()
+		mapDecoder := xml2map.NewDecoder(strings.NewReader(buf.String()))
+		responseMap, mapErr := mapDecoder.Decode()
 		fmt.Printf("response: %v, err: %v", responseMap, mapErr)
 	}
 
 	// xml Decoder (used with and without MTOM) cannot handle namespace prefixes (yet),
 	// so we have to use a namespace-less response envelope
-	respEnvelope := new(SOAPEnvelopeResponse)
-	respEnvelope.Body = SOAPBodyResponse{
-		Content: response,
-		Fault: &SOAPFault{
+	respEnvelope := new(EnvelopeResponse)
+	respEnvelope.Header = &HeaderResponse{
+		Headers: responseHeader,
+	}
+	//respEnvelope.Header.Headers = append(respEnvelope.Header.Headers, responseHeader)
+	respEnvelope.Body = BodyResponse{
+		Content: responseContent,
+		Fault: &Fault{
 			Detail: faultDetail,
 		},
 	}

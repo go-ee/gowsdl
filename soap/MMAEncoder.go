@@ -107,7 +107,7 @@ func getMmaHeader(contentType string) (string, error) {
 }
 
 func (d *mmaDecoder) Decode(v interface{}) error {
-	soapEnvResp := v.(*SOAPEnvelopeResponse)
+	soapEnvResp := v.(*EnvelopeResponse)
 	attachments := make([]MIMEMultipartAttachment, 0)
 	for {
 		p, err := d.reader.NextPart()

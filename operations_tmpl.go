@@ -22,20 +22,20 @@ var opsTmpl = `
 			// {{range .Faults}}
 			//   - {{.Name}} {{.Doc}}{{end}}{{end}}
 			{{if ne .Doc ""}}/* {{.Doc}} */{{end}}
-			{{makePublic .Name | replaceReservedWords}} ({{if ne $requestType ""}}request *{{$requestType}}{{end}}, headers map[string]string) ({{if ne $responseType ""}}*{{$responseType}}, {{end}}error)
+			{{makePublic .Name | replaceReservedWords}} ({{if ne $requestType ""}}request *{{$requestType}}{{end}}, responseHeader map[string]interface{}, headers map[string]string) ({{if ne $responseType ""}}*{{$responseType}}, {{end}}error)
 			{{/*end*/}}
-			{{makePublic .Name | replaceReservedWords}}Context (ctx context.Context, {{if ne $requestType ""}}request *{{$requestType}}{{end}}, headers map[string]string) ({{if ne $responseType ""}}*{{$responseType}}, {{end}}error)
+			{{makePublic .Name | replaceReservedWords}}Context (ctx context.Context, {{if ne $requestType ""}}request *{{$requestType}}{{end}}, responseHeader map[string]interface{}, headers map[string]string) ({{if ne $responseType ""}}*{{$responseType}}, {{end}}error)
 			{{/*end*/}}
 		{{end}}
 	}
 
 	type {{$privateType}} struct {
-		client *soap.Client
+		Client *soap.Client
 	}
 
 	func New{{$exportType}}(client *soap.Client) {{$exportType}} {
 		return &{{$privateType}}{
-			client: client,
+			Client: client,
 		}
 	}
 
@@ -43,9 +43,9 @@ var opsTmpl = `
 		{{$requestType := findType .Input.Message | replaceReservedWords | makePublic}}
 		{{$soapAction := findSOAPAction .Name $privateType}}
 		{{$responseType := findType .Output.Message | replaceReservedWords | makePublic}}
-		func (service *{{$privateType}}) {{makePublic .Name | replaceReservedWords}}Context (ctx context.Context, {{if ne $requestType ""}}request *{{$requestType}}{{end}}, headers map[string]string) ({{if ne $responseType ""}}*{{$responseType}}, {{end}}error) {
+		func (service *{{$privateType}}) {{makePublic .Name | replaceReservedWords}}Context (ctx context.Context, {{if ne $requestType ""}}request *{{$requestType}}{{end}}, responseHeader map[string]interface{}, headers map[string]string) ({{if ne $responseType ""}}*{{$responseType}}, {{end}}error) {
 			{{if ne $responseType ""}}response := new({{$responseType}}){{end}}
-			err := service.client.CallContext(ctx, "{{if ne $soapAction ""}}{{$soapAction}}{{else}}''{{end}}", {{if ne $requestType ""}}request{{else}}nil{{end}}, {{if ne $responseType ""}}response{{else}}struct{}{}{{end}}, headers)
+			err := service.Client.CallContext(ctx, "{{if ne $soapAction ""}}{{$soapAction}}{{else}}''{{end}}", {{if ne $requestType ""}}request{{else}}nil{{end}}, {{if ne $responseType ""}}responseHeader, response{{else}}struct{}{}{{end}}, headers)
 			if err != nil {
 				return {{if ne $responseType ""}}nil, {{end}}err
 			}
@@ -53,10 +53,11 @@ var opsTmpl = `
 			return {{if ne $responseType ""}}response, {{end}}nil
 		}
 
-		func (service *{{$privateType}}) {{makePublic .Name | replaceReservedWords}} ({{if ne $requestType ""}}request *{{$requestType}}{{end}}, headers map[string]string) ({{if ne $responseType ""}}*{{$responseType}}, {{end}}error) {
+		func (service *{{$privateType}}) {{makePublic .Name | replaceReservedWords}} ({{if ne $requestType ""}}request *{{$requestType}}{{end}}, responseHeader map[string]interface{}, headers map[string]string) ({{if ne $responseType ""}}*{{$responseType}}, {{end}}error) {
 			return service.{{makePublic .Name | replaceReservedWords}}Context(
 				context.Background(),
 				{{if ne $requestType ""}}request,{{end}}
+				responseHeader,
 				headers,
 			)
 		}
