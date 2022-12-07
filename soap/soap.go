@@ -6,12 +6,10 @@ import (
 	"crypto/tls"
 	"encoding/xml"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/sbabiv/xml2map"
 	"io"
 	"net"
 	"net/http"
-	"strings"
+	"net/http/cookiejar"
 	"time"
 )
 
@@ -37,36 +35,6 @@ type Envelope struct {
 
 	Header *Header
 	Body   Body
-}
-
-type Header struct {
-	XMLName xml.Name `xml:"soap:Header"`
-	Headers []interface{}
-}
-type HeaderResponse struct {
-	XMLName xml.Name `xml:"Header"`
-	Headers Headers  `xml:",any"`
-}
-
-type Headers map[string]interface{}
-
-type HeaderPart struct {
-	XMLName xml.Name
-	Content string `xml:",chardata"`
-}
-
-func (o *Headers) UnmarshalXML(d *xml.Decoder, start xml.StartElement) (err error) {
-	if *o == nil {
-		*o = Headers{}
-	}
-
-	e := HeaderPart{}
-	if err = d.DecodeElement(&e, &start); err != nil {
-		return
-	}
-
-	(*o)[e.XMLName.Local] = e.Content
-	return
 }
 
 type Body struct {
@@ -260,147 +228,91 @@ func NewWSSSecurityHeader(user, pass, tokenID, mustUnderstand string) *WSSSecuri
 	return hdr
 }
 
-type basicAuth struct {
+type BasicAuth struct {
 	Login    string
 	Password string
 }
 
-type options struct {
-	tlsCfg           *tls.Config
-	auth             *basicAuth
-	timeout          time.Duration
-	contimeout       time.Duration
-	tlshshaketimeout time.Duration
-	client           HTTPClient
-	httpHeaders      map[string]string
-	mtom             bool
-	mma              bool
-	userAgent        string
+type Options struct {
+	TlsConfig           *tls.Config
+	BasicAuth           *BasicAuth
+	Timeout             time.Duration
+	ConnectionTimeout   time.Duration
+	TlsHandShakeTimeout time.Duration
+	Client              HTTPClient
+	HttpHeaders         map[string]string
+	Mtom                bool
+	Mma                 bool
+	UserAgent           string
+	Debug               bool
 }
 
-var defaultOptions = options{
-	timeout:          time.Duration(30 * time.Second),
-	contimeout:       time.Duration(90 * time.Second),
-	tlshshaketimeout: time.Duration(15 * time.Second),
-	userAgent:        "gowsdl/0.1",
+var defaultOptions = Options{
+	Timeout:             30 * time.Second,
+	ConnectionTimeout:   90 * time.Second,
+	TlsHandShakeTimeout: 15 * time.Second,
+	UserAgent:           "gowsdl/0.1",
 }
 
-// A Option sets options such as credentials, tls, etc.
-type Option func(*options)
+func DefaultOptions() Options {
+	return defaultOptions
+}
 
-// WithHTTPClient is an Option to set the HTTP client to use
-// This cannot be used with WithTLSHandshakeTimeout, WithTLS,
-// WithTimeout options
-func WithHTTPClient(c HTTPClient) Option {
-	return func(o *options) {
-		o.client = c
+func (o *Options) BuildHttpClient() (ret *http.Client, err error) {
+	tr := &http.Transport{
+		TLSClientConfig: o.TlsConfig,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			d := net.Dialer{Timeout: o.Timeout}
+			return d.DialContext(ctx, network, addr)
+		},
+		TLSHandshakeTimeout: o.TlsHandShakeTimeout,
 	}
-}
-
-// WithTLSHandshakeTimeout is an Option to set default tls handshake timeout
-// This option cannot be used with WithHTTPClient
-func WithTLSHandshakeTimeout(t time.Duration) Option {
-	return func(o *options) {
-		o.tlshshaketimeout = t
+	var jar *cookiejar.Jar
+	if jar, err = cookiejar.New(nil); err != nil {
+		return
 	}
+	ret = &http.Client{Timeout: o.ConnectionTimeout, Transport: tr, Jar: jar}
+	return
 }
 
-// WithRequestTimeout is an Option to set default end-end connection timeout
-// This option cannot be used with WithHTTPClient
-func WithRequestTimeout(t time.Duration) Option {
-	return func(o *options) {
-		o.contimeout = t
+func (o *Options) getOrBuildHttpClient() (ret HTTPClient, err error) {
+	if o.Client == nil {
+		o.Client, err = o.BuildHttpClient()
 	}
+	ret = o.Client
+	return
 }
 
-// WithBasicAuth is an Option to set BasicAuth
-func WithBasicAuth(login, password string) Option {
-	return func(o *options) {
-		o.auth = &basicAuth{Login: login, Password: password}
-	}
-}
-
-// WithTLS is an Option to set tls config
-// This option cannot be used with WithHTTPClient
-func WithTLS(tls *tls.Config) Option {
-	return func(o *options) {
-		o.tlsCfg = tls
-	}
-}
-
-// WithTimeout is an Option to set default HTTP dial timeout
-func WithTimeout(t time.Duration) Option {
-	return func(o *options) {
-		o.timeout = t
-	}
-}
-
-// WithHTTPHeaders is an Option to set global HTTP headers for all requests
-func WithHTTPHeaders(headers map[string]string) Option {
-	return func(o *options) {
-		o.httpHeaders = headers
-	}
-}
-
-// WithMTOM is an Option to set Message Transmission Optimization Mechanism
-// MTOM encodes fields of type Binary using XOP.
-func WithMTOM() Option {
-	return func(o *options) {
-		o.mtom = true
-	}
-}
-
-// WithMIMEMultipartAttachments is an Option to set SOAP MIME Multipart attachment support.
-// Use Client.AddMIMEMultipartAttachment to add attachments of type MIMEMultipartAttachment to your SOAP request.
-func WithMIMEMultipartAttachments() Option {
-	return func(o *options) {
-		o.mma = true
-	}
-}
-
-// Client is soap client
+// Client is soap Client
 type Client struct {
-	url           string
-	opts          *options
-	headers       []interface{}
-	debugResponse bool
-	attachments   []MIMEMultipartAttachment
+	Headers     *XmlContent
+	url         string
+	opts        *Options
+	attachments []MIMEMultipartAttachment
 }
 
-// HTTPClient is a client which can make HTTP requests
+// HTTPClient is a Client which can make HTTP requests
 // An example implementation is net/http.Client
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// NewClient creates new SOAP client instance
-func NewClient(url string, opt ...Option) *Client {
-	opts := defaultOptions
-	for _, o := range opt {
-		o(&opts)
+// NewClient creates new SOAP Client instance
+func NewClient(url string, opts *Options) *Client {
+	if opts == nil {
+		defOpts := DefaultOptions()
+		opts = &defOpts
 	}
 	return &Client{
 		url:  url,
-		opts: &opts,
+		opts: opts,
 	}
 }
 
-// AddHeader adds envelope header
-// For correct behavior, every header must contain a `XMLName` field.  Refer to #121 for details
-func (s *Client) AddHeader(header interface{}) {
-	s.headers = append(s.headers, header)
-}
-
-// AddMIMEMultipartAttachment adds an attachment to the client that will be sent only if the
+// AddMIMEMultipartAttachment adds an attachment to the Client that will be sent only if the
 // WithMIMEMultipartAttachments option is used
 func (s *Client) AddMIMEMultipartAttachment(attachment MIMEMultipartAttachment) {
 	s.attachments = append(s.attachments, attachment)
-}
-
-// SetHeaders sets envelope headers, overwriting any existing headers.
-// For correct behavior, every header must contain a `XMLName` field.  Refer to #121 for details
-func (s *Client) SetHeaders(headers ...interface{}) {
-	s.headers = headers
 }
 
 // CallContext performs HTTP POST request with a context
@@ -449,20 +361,21 @@ func (s *Client) call(ctx context.Context, soapAction string, request interface{
 		XmlNS: XmlNsSoapEnv,
 	}
 
-	if s.headers != nil && len(s.headers) > 0 {
+	if s.Headers != nil {
 		envelope.Header = &Header{
-			Headers: s.headers,
+			Headers: s.Headers,
 		}
 	}
 
 	envelope.Body.Content = request
 	buffer := new(bytes.Buffer)
+	buffer.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	var encoder SOAPEncoder
-	if s.opts.mtom && s.opts.mma {
+	if s.opts.Mtom && s.opts.Mma {
 		return fmt.Errorf("cannot use MTOM (XOP) and MMA (MIME Multipart Attachments) option at the same time")
-	} else if s.opts.mtom {
+	} else if s.opts.Mtom {
 		encoder = newMtomEncoder(buffer)
-	} else if s.opts.mma {
+	} else if s.opts.Mma {
 		encoder = newMmaEncoder(buffer, s.attachments)
 	} else {
 		encoder = xml.NewEncoder(buffer)
@@ -480,23 +393,23 @@ func (s *Client) call(ctx context.Context, soapAction string, request interface{
 	if req, err = http.NewRequest("POST", s.url, buffer); err != nil {
 		return
 	}
-	if s.opts.auth != nil {
-		req.SetBasicAuth(s.opts.auth.Login, s.opts.auth.Password)
+	if s.opts.BasicAuth != nil {
+		req.SetBasicAuth(s.opts.BasicAuth.Login, s.opts.BasicAuth.Password)
 	}
 
 	req = req.WithContext(ctx)
 
-	if s.opts.mtom {
+	if s.opts.Mtom {
 		req.Header.Add("Content-Type", fmt.Sprintf(mtomContentType, encoder.(*mtomEncoder).Boundary()))
-	} else if s.opts.mma {
+	} else if s.opts.Mma {
 		req.Header.Add("Content-Type", fmt.Sprintf(mmaContentType, encoder.(*mmaEncoder).Boundary()))
 	} else {
 		req.Header.Add("Content-Type", "text/xml; charset=\"utf-8\"")
 	}
 	req.Header.Add("SOAPAction", soapAction)
-	req.Header.Set("User-Agent", s.opts.userAgent)
-	if s.opts.httpHeaders != nil {
-		for k, v := range s.opts.httpHeaders {
+	req.Header.Set("User-Agent", s.opts.UserAgent)
+	if s.opts.HttpHeaders != nil {
+		for k, v := range s.opts.HttpHeaders {
 			req.Header.Set(k, v)
 		}
 	}
@@ -507,17 +420,13 @@ func (s *Client) call(ctx context.Context, soapAction string, request interface{
 
 	req.Close = true
 
-	client := s.opts.client
-	if client == nil {
-		tr := &http.Transport{
-			TLSClientConfig: s.opts.tlsCfg,
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				d := net.Dialer{Timeout: s.opts.timeout}
-				return d.DialContext(ctx, network, addr)
-			},
-			TLSHandshakeTimeout: s.opts.tlshshaketimeout,
-		}
-		client = &http.Client{Timeout: s.opts.contimeout, Transport: tr}
+	var client HTTPClient
+	if client, err = s.opts.getOrBuildHttpClient(); err != nil {
+		return
+	}
+
+	if s.opts.Debug {
+		fmt.Printf("\nrequest: body=%v, header=%v\n", buffer.String(), req.Header)
 	}
 
 	var res *http.Response
@@ -527,16 +436,23 @@ func (s *Client) call(ctx context.Context, soapAction string, request interface{
 	defer res.Body.Close()
 
 	bodyReader := res.Body
-	if s.debugResponse {
+	if s.opts.Debug {
+		fmt.Printf("\n=== Start: Debug Response ===\n")
 		buf := new(bytes.Buffer)
 		_, err = buf.ReadFrom(bodyReader)
-		spew.Dump("SOAP Response: ", res)
-		fmt.Printf("Response.Body: %v", buf.String())
 		bodyReader = io.NopCloser(bytes.NewReader(buf.Bytes()))
 
-		mapDecoder := xml2map.NewDecoder(strings.NewReader(buf.String()))
-		responseMap, mapErr := mapDecoder.Decode()
-		fmt.Printf("response: %v, err: %v", responseMap, mapErr)
+		fmt.Printf("\nresponse: body=%v, header=%v\n", buf.String(), res.Header)
+
+		//spew.Dump("SOAP Response: ", res)
+		//fmt.Printf("Response.Body: %v", buf.String())
+		//bodyReader = io.NopCloser(bytes.NewReader(buf.Bytes()))
+
+		//mapDecoder := xml2map.NewDecoder(strings.NewReader(buf.String()))
+		//responseMap, mapErr := mapDecoder.Decode()
+		//fmt.Printf("response: %v, err: %v", responseMap, mapErr)
+
+		fmt.Printf("\n=== End: Debug Response===\n")
 	}
 
 	// xml Decoder (used with and without MTOM) cannot handle namespace prefixes (yet),
@@ -545,7 +461,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request interface{
 	respEnvelope.Header = &HeaderResponse{
 		Headers: responseHeader,
 	}
-	//respEnvelope.Header.Headers = append(respEnvelope.Header.Headers, responseHeader)
+	//respEnvelope.Header.ResponseHeaders = append(respEnvelope.Header.ResponseHeaders, responseHeader)
 	respEnvelope.Body = BodyResponse{
 		Content: responseContent,
 		Fault: &Fault{
@@ -560,7 +476,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request interface{
 	}
 
 	var mmaBoundary string
-	if s.opts.mma {
+	if s.opts.Mma {
 		if mmaBoundary, err = getMmaHeader(contentType); err != nil {
 			return
 		}

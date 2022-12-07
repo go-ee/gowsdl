@@ -2,15 +2,13 @@ package example
 
 import (
 	"crypto/tls"
-	"log"
-	"time"
-
 	"github.com/hooklift/gowsdl/example/gen"
 	"github.com/hooklift/gowsdl/soap"
+	"log"
 )
 
 func ExampleBasicUsage() {
-	client := soap.NewClient("http://svc.asmx")
+	client := soap.NewClient("http://svc.asmx", nil)
 	service := gen.NewStockQuotePortType(client)
 	reply, err := service.GetLastTradePrice(&gen.TradePriceRequest{})
 	if err != nil {
@@ -20,12 +18,14 @@ func ExampleBasicUsage() {
 }
 
 func ExampleWithOptions() {
-	client := soap.NewClient(
-		"http://svc.asmx",
-		soap.WithTimeout(time.Second*5),
-		soap.WithBasicAuth("usr", "psw"),
-		soap.WithTLS(&tls.Config{InsecureSkipVerify: true}),
-	)
+	opts := soap.DefaultOptions()
+	opts.BasicAuth = &soap.BasicAuth{
+		Login:    "usr",
+		Password: "psw",
+	}
+	opts.TlsConfig = &tls.Config{InsecureSkipVerify: true}
+
+	client := soap.NewClient("http://svc.asmx", &opts)
 	service := gen.NewStockQuotePortType(client)
 	reply, err := service.GetLastTradePrice(&gen.TradePriceRequest{})
 	if err != nil {
