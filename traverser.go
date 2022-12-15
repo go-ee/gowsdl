@@ -5,34 +5,21 @@ import (
 	"strings"
 )
 
-type traverseMode int32
-
-const (
-	refResolution traverseMode = iota
-	findNameByType
-)
-
 type traverser struct {
-	c   *XSDSchema
-	all []*XSDSchema
-	tm  traverseMode
-	// fields used by findNameByType mode
-	typeName             string
-	foundElmName         string
-	conflictingTypeUsage bool
+	c        *XSDSchema
+	all      []*XSDSchema
+	resolver *NsTypeResolver
 }
 
-func newTraverser(c *XSDSchema, all []*XSDSchema) *traverser {
+func newTraverser(c *XSDSchema, all []*XSDSchema, resolver *NsTypeResolver) *traverser {
 	return &traverser{
-		c:   c,
-		all: all,
-		tm:  refResolution, // default traverse mode is refResolution
+		c:        c,
+		all:      all,
+		resolver: resolver,
 	}
 }
 
-func (t *traverser) traverse() {
-	t.tm = refResolution
-
+func (t *traverser) Traverse() {
 	for _, ct := range t.c.ComplexTypes {
 		t.traverseComplexType(ct)
 	}
@@ -42,46 +29,7 @@ func (t *traverser) traverse() {
 	for _, elm := range t.c.Elements {
 		t.traverseElement(elm)
 	}
-}
-
-// Given a type, check if there is an Element with that type, and return its name.
-// If multiple elements with identical names of the given type are found,
-// the name is returned.
-// If multiple elements with different names of the given type are found,
-// the original type name is returned instead.
-// If no elements are found, the original type name is returned instead.
-func (t *traverser) findNameByType(name string) string {
-	t.initFindNameByType(name)
-
-	// Search for elements of given type
-	for _, schema := range t.all {
-		for _, elm := range schema.Elements {
-			t.traverseElement(elm)
-		}
-		for _, ct := range schema.ComplexTypes {
-			t.traverseComplexType(ct)
-		}
-		for _, st := range schema.SimpleType {
-			t.traverseSimpleType(st)
-		}
-	}
-
-	// Return found element name if given type is used only once
-	if len(t.foundElmName) > 0 && !t.conflictingTypeUsage {
-		return t.foundElmName
-	}
-
-	// Return original type name
-	// No element found or conflicting element names found
-	return t.typeName
-}
-
-func (t *traverser) initFindNameByType(name string) {
-	// Initialize fields for processing
-	t.tm = findNameByType
-	t.typeName = stripns(name)
-	t.foundElmName = ""
-	t.conflictingTypeUsage = false
+	return
 }
 
 func (t *traverser) traverseElements(ct []*XSDElement) {
@@ -91,39 +39,17 @@ func (t *traverser) traverseElements(ct []*XSDElement) {
 }
 
 func (t *traverser) traverseElement(elm *XSDElement) {
-	t.findElmName(elm)
-
 	if elm.ComplexType != nil {
 		t.traverseComplexType(elm.ComplexType)
 	}
 	if elm.SimpleType != nil {
 		t.traverseSimpleType(elm.SimpleType)
 	}
-}
-
-func (t *traverser) findElmName(elm *XSDElement) {
-	// Check if we are called by findNameByType
-	if t.tm != findNameByType {
-		return
-	}
-
-	// Conflicting type usage already detected -> no need to search any further
-	if t.conflictingTypeUsage {
-		return
-	}
-
-	if stripns(elm.Type) == t.typeName {
-		if len(t.foundElmName) == 0 {
-			// First time usage t.typeName
-			t.foundElmName = elm.Name
-		} else if t.foundElmName != elm.Name {
-			// Duplicate use of t.typeName with different element names
-			t.conflictingTypeUsage = true
-		}
-	}
+	t.resolver.OnElement(elm)
 }
 
 func (t *traverser) traverseSimpleType(st *XSDSimpleType) {
+	t.resolver.OnSimpleType(st)
 }
 
 func (t *traverser) traverseComplexType(ct *XSDComplexType) {
@@ -137,6 +63,8 @@ func (t *traverser) traverseComplexType(ct *XSDComplexType) {
 	t.traverseElements(ct.ComplexContent.Extension.Choice)
 	t.traverseElements(ct.ComplexContent.Extension.SequenceChoice)
 	t.traverseAttributes(ct.SimpleContent.Extension.Attributes)
+
+	t.resolver.OnComplexType(ct)
 }
 
 func (t *traverser) traverseAttributes(attrs []*XSDAttribute) {
@@ -146,11 +74,6 @@ func (t *traverser) traverseAttributes(attrs []*XSDAttribute) {
 }
 
 func (t *traverser) traverseAttribute(attr *XSDAttribute) {
-	// Check if we are in ref resolution mode
-	if t.tm != refResolution {
-		return
-	}
-
 	if attr.Ref != "" {
 		refAttr := t.getGlobalAttribute(attr.Ref)
 		if refAttr != nil && refAttr.Ref == "" {

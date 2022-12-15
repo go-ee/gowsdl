@@ -77,7 +77,7 @@ func TestLocation_ParseLocation_File(t *testing.T) {
 			t.Error("Path should be absolute")
 		}
 		if _, err := os.Stat(r.String()); err != nil {
-			t.Errorf("Location should point to existing loc: %s", err.Error())
+			t.Errorf("Location should point to existing location: %s", err.Error())
 		}
 	}
 }

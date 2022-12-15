@@ -47,15 +47,12 @@ Make code generation agnostic so generating code to other programming languages 
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
-	"go/format"
+	"github.com/hooklift/gowsdl"
 	"log"
 	"os"
-	"path/filepath"
-
-	gen "github.com/hooklift/gowsdl"
+	"strings"
 )
 
 // Version is initialized in compilation time by go build.
@@ -65,9 +62,10 @@ var Version string
 var Name string
 
 var vers = flag.Bool("v", false, "Shows gowsdl version")
+var filePrefix = flag.String("l", "", "File prefix, label")
 var pkg = flag.String("p", "myservice", "Package under which code will be generated")
 var outFile = flag.String("o", "myservice.go", "File where the generated code will be saved")
-var dir = flag.String("d", "./", "Directory under which package directory will be created")
+var dir = flag.String("d", "./", "Directory under which service package directory will be created")
 var insecure = flag.Bool("i", false, "Skips TLS Verification")
 var makePublic = flag.Bool("make-public", true, "Make the generated types public/exported")
 
@@ -96,6 +94,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	if err := generate(); err != nil {
+		log.Fatalln(err)
+	}
+}
+
+func generate() (err error) {
 	wsdlPath := os.Args[len(os.Args)-1]
 
 	if *outFile == wsdlPath {
@@ -103,59 +107,20 @@ func main() {
 	}
 
 	// load wsdl
-	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, *insecure, *makePublic)
-	if err != nil {
-		log.Fatalln(err)
+	var wsdl *gowsdl.GoWSDL
+	if wsdl, err = gowsdl.NewGoWSDL(
+		wsdlPath, *filePrefix,
+		strings.TrimSpace(*dir),
+		strings.TrimSpace(*pkg),
+		*insecure, *makePublic); err != nil {
+		return
 	}
 
 	// generate code
-	gocode, err := gowsdl.Start()
-	if err != nil {
-		log.Fatalln(err)
+	if err = wsdl.Generate(); err != nil {
+		return
 	}
-
-	pkg := filepath.Join(*dir, *pkg)
-	err = os.Mkdir(pkg, 0744)
-
-	file, err := os.Create(filepath.Join(pkg, *outFile))
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer file.Close()
-
-	data := new(bytes.Buffer)
-	data.Write(gocode["header"])
-	data.Write(gocode["types"])
-	data.Write(gocode["operations"])
-	data.Write(gocode["soap"])
-
-	// go fmt the generated code
-	source, err := format.Source(data.Bytes())
-	if err != nil {
-		file.Write(data.Bytes())
-		log.Fatalln(err)
-	}
-
-	file.Write(source)
-
-	// server
-	serverFile, err := os.Create(pkg + "/" + "server" + *outFile)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer serverFile.Close()
-
-	serverData := new(bytes.Buffer)
-	serverData.Write(gocode["server_header"])
-	serverData.Write(gocode["server_wsdl"])
-	serverData.Write(gocode["server"])
-
-	serverSource, err := format.Source(serverData.Bytes())
-	if err != nil {
-		serverFile.Write(serverData.Bytes())
-		log.Fatalln(err)
-	}
-	serverFile.Write(serverSource)
 
 	log.Println("Done 👍")
+	return
 }

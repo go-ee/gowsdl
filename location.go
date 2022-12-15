@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-// A Location encapsulate information about the loc of WSDL/XSD.
+// A Location encapsulate information about the location of WSDL/XSD.
 //
 // It could be either URL or an absolute file path.
 type Location struct {
