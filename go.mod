@@ -3,7 +3,6 @@ module github.com/hooklift/gowsdl
 go 1.15
 
 require (
-	github.com/davecgh/go-spew v1.1.0
-	github.com/sbabiv/xml2map v1.2.1
+	github.com/iancoleman/strcase v0.2.0 // indirect
 	github.com/stretchr/testify v1.6.1
 )

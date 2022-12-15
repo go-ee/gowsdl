@@ -246,20 +246,25 @@ func NewContext(wsdl *GoWSDL) (ret *Context) {
 	return
 }
 
-func (o *Context) ResolveGoType(xsdType string, nillable bool) (ret string) {
-	return o.currentResolver.ResolveGoType(xsdType, nillable)
+func (o *Context) FindTypeNillable(xsdType string, nillable bool) (ret string) {
+	return o.currentResolver.FindTypeNillable(xsdType, nillable)
 }
 
-func (o *Context) FindMessageType(message string) (ret string) {
-	return o.ResolveGoType(message, false)
+func (o *Context) FindTypeNotNillable(xsdType string) (ret string) {
+	return o.FindTypeNillable(xsdType, false)
 }
 
-func (o *Context) FindMessageTypeName(message string) (ret string) {
-	ret = o.ResolveGoType(message, false)
+func (o *Context) FindTypeName(message string) (ret string) {
+	ret = o.FindTypeNotNillable(message)
+	ret = o.removePackage(ret)
+	return
+}
+
+func (o *Context) removePackage(ret string) string {
 	if strings.Contains(ret, ".") {
 		ret = strings.Split(ret, ".")[1]
 	}
-	return
+	return ret
 }
 
 func (o *Context) setNS(ns string) string {
@@ -277,7 +282,7 @@ func (o *Context) getNS() string {
 
 // Given a type, check if there's an Element with that type, and return its name.
 func (o *Context) findNameByType(name string) (ret string) {
-	ret = o.currentResolver.ResolveGoType(name, true)
+	ret = o.currentResolver.FindTypeNillable(name, true)
 	//return newTraverser(nil, g.wsdl.Types.Schemas).findNameByType(name)
 	return
 }
@@ -293,7 +298,9 @@ func (o *Context) goImports() (ret string) {
 func (g *GoWSDL) genTypes() (err error) {
 	context := NewContext(g)
 	funcMap := template.FuncMap{
-		"toGoType":                 context.ResolveGoType,
+		"findTypeNillable":         context.FindTypeNillable,
+		"findType":                 context.FindTypeNotNillable,
+		"findTypeName":             context.FindTypeName,
 		"stripns":                  stripns,
 		"replaceReservedWords":     replaceReservedWords,
 		"replaceAttrReservedWords": replaceAttrReservedWords,
@@ -303,23 +310,35 @@ func (g *GoWSDL) genTypes() (err error) {
 		"comment":                  comment,
 		"removeNS":                 removeNS,
 		"goString":                 goString,
-		"findNameByType":           context.findNameByType,
 		"removePointerFromType":    removePointerFromType,
 		"getNS":                    context.getNS,
 		"goPackage":                context.goPackage,
 		"goImports":                context.goImports,
 	}
 
-	tmpl := template.Must(template.New("Types").Funcs(funcMap).Parse(schemaTmpl))
+	schemaToContent := map[string]*bytes.Buffer{}
+
+	tmplHeader := template.Must(template.New("TypesHeader").Funcs(funcMap).Parse(schemaHeader))
+	tmplBody := template.Must(template.New("TypesBody").Funcs(funcMap).Parse(schemaTmpl))
 
 	for _, schema := range g.wsdl.Types.Schemas {
-		data := new(bytes.Buffer)
 		context.setNS(schema.TargetNamespace)
-		if err = tmpl.Execute(data, schema); err != nil {
+
+		data := schemaToContent[schema.TargetNamespace]
+		if data == nil {
+			data = new(bytes.Buffer)
+			schemaToContent[schema.TargetNamespace] = data
+			if err = tmplHeader.Execute(data, schema); err != nil {
+				return
+			}
+		}
+		if err = tmplBody.Execute(data, schema); err != nil {
 			return
 		}
+	}
 
-		if err = g.writeFile(schema.TargetNamespace, g.formatSource(data), ""); err != nil {
+	for namespace, data := range schemaToContent {
+		if err = g.writeFile(namespace, g.formatSource(data), ""); err != nil {
 			return
 		}
 	}
@@ -332,6 +351,7 @@ func (g *GoWSDL) writeFile(targetNamespace string, source []byte, subDir string)
 
 	var file *os.File
 	targetFile := filepath.Join(targetFolder, g.filePrefix+g.typeResolver.NamespaceToPackage[targetNamespace]+".go")
+	log.Printf("generate : %v, %v\n", targetNamespace, targetFile)
 	if file, err = os.Create(targetFile); err != nil {
 		return
 	}
@@ -372,13 +392,14 @@ func NamespaceToFileName(namespace string) (ret string) {
 func (g *GoWSDL) genService() (err error) {
 	context := NewContext(g)
 	funcMap := template.FuncMap{
-		"toGoType":             context.ResolveGoType,
+		"findTypeNillable":     context.FindTypeNillable,
+		"findType":             context.FindTypeNotNillable,
+		"findTypeName":         context.FindTypeName,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"normalize":            normalize,
 		"makePublic":           g.makePublicFn,
 		"makePrivate":          makePrivate,
-		"findType":             context.FindMessageType,
 		"findSOAPAction":       g.findSOAPAction,
 		"findServiceAddress":   g.findServiceAddress,
 		"comment":              comment,
@@ -401,12 +422,12 @@ func (g *GoWSDL) genServer() (err error) {
 	subDir := "mock"
 	context := NewContext(g)
 	funcMap := template.FuncMap{
-		"toGoType":             context.ResolveGoType,
+		"findTypeNillable":     context.FindTypeNillable,
+		"findType":             context.FindTypeNotNillable,
+		"findTypeName":         context.FindTypeName,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"makePublic":           g.makePublicFn,
-		"findType":             context.FindMessageType,
-		"findTypeName":         context.FindMessageTypeName,
 		"findSOAPAction":       g.findSOAPAction,
 		"findServiceAddress":   g.findServiceAddress,
 		"comment":              comment,
@@ -430,7 +451,7 @@ func (g *GoWSDL) genServer() (err error) {
 func (g *GoWSDL) formatSource(data *bytes.Buffer) (ret []byte) {
 	var err error
 	if ret, err = format.Source(data.Bytes()); err != nil {
-		log.Print("server mock format err", err)
+		log.Printf("format err: %v\n", err)
 		ret = data.Bytes()
 	}
 	return

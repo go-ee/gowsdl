@@ -3,6 +3,7 @@ package gowsdl
 import (
 	"bytes"
 	"fmt"
+	"github.com/iancoleman/strcase"
 	"log"
 	"strings"
 )
@@ -50,23 +51,6 @@ func (o *TypeResolver) SetNamespaceToPackage(namespace string, nativePackage boo
 		o.NamespaceToPackageFull[namespace] = ""
 		o.NamespaceToPackage[namespace] = ""
 	}
-}
-
-func (o *TypeResolver) BuildGoType(namespace string, typeName string) (ret string) {
-	ret = xsd2GoTypes[strings.ToLower(typeName)]
-
-	if ret == "" {
-		ret = replaceReservedWords(makePublic(typeName))
-		if namespace != "" {
-			goPackage := o.NamespaceToPackage[namespace]
-			if goPackage != "" {
-				ret = fmt.Sprintf("%v.%v", goPackage, ret)
-			} else {
-				log.Printf("no package for namespace found: %v, %v", namespace, typeName)
-			}
-		}
-	}
-	return
 }
 
 func (o *TypeResolver) RegisterTypes(wsdl *WSDL) (ret *NsTypeResolver) {
@@ -151,7 +135,7 @@ func (o *NsTypeResolver) GetGoImports() string {
 	return o.goImports
 }
 
-func (o *NsTypeResolver) ResolveGoType(xsdType string, nillable bool) (ret string) {
+func (o *NsTypeResolver) FindTypeNillable(xsdType string, nillable bool) (ret string) {
 	ret = o.findTypeNameFull(xsdType, true)
 	if nillable && !isBasicType(ret) {
 		ret = "*" + ret
@@ -200,62 +184,7 @@ func (o *NsTypeResolver) OnElement(item *XSDElement) {
 	} else {
 		//no virtual types to register
 	}
-	/*
-		if item.Name != "" {
-			typeNameFull := o.findTypeNameFull(item.Type, false)
-			if typeNameFull != "" {
-				o.RegisterType(item.Name, typeNameFull)
-			} else {
-				log.Printf("can't register type for the XSD element: %v", item)
-			}
-		}*/
 }
-
-/*
-
-// Given a message, finds its type.
-//
-// I'm not very proud of this function but
-// it works for now and performance doesn't
-// seem critical at this point
-func (g *GoWSDL) findType(message string) string {
-	message = stripns(message)
-
-	for _, msg := range g.wsdl.Messages {
-		if msg.Name != message {
-			continue
-		}
-
-		// Assumes document/literal wrapped WS-I
-		if len(msg.Parts) == 0 {
-			// Message does not have parts. This could be a Port
-			// with HTTP binding or SOAP 1.2 binding, which are not currently
-			// supported.
-			log.Printf("[WARN] %s message doesn't have any parts, ignoring message...", msg.Name)
-			continue
-		}
-
-		part := msg.Parts[0]
-		if part.Type != "" {
-			return stripns(part.Type)
-		}
-
-		elRef := stripns(part.Element)
-
-		for _, schema := range g.wsdl.Types.Schemas {
-			for _, el := range schema.Elements {
-				if strings.EqualFold(elRef, el.Name) {
-					if el.Type != "" {
-						return stripns(el.Type)
-					}
-					return el.Name
-				}
-			}
-		}
-	}
-	return ""
-}
-*/
 
 func (o *NsTypeResolver) OnMessage(msg *WSDLMessage) {
 	// Assumes document/literal wrapped WS-I
@@ -284,11 +213,27 @@ func (o *NsTypeResolver) OnMessage(msg *WSDLMessage) {
 
 func (o *NsTypeResolver) findTypeNameFull(nsName string, buildNotAvailable bool) (ret string) {
 	namespace, typeName := o.toNamespaceAndType(nsName)
-	nsResolver := o.Resolver.NamespaceToResolver[namespace]
-	if nsResolver != nil {
-		ret = nsResolver.getTypeNameFull(typeName, buildNotAvailable)
-	} else if buildNotAvailable {
-		ret = o.Resolver.BuildGoType(namespace, typeName)
+	if typeName == "ArrayOf_xsd_anyType" {
+		log.Printf(ret)
+	}
+	if o.isMyNamespace(namespace) {
+		ret = o.getTypeName(typeName, buildNotAvailable)
+	} else {
+		nsResolver := o.Resolver.NamespaceToResolver[namespace]
+		if nsResolver != nil {
+			ret = nsResolver.getTypeNameFull(typeName, buildNotAvailable)
+		} else if buildNotAvailable {
+			ret = o.BuildGoType(namespace, typeName)
+		}
+	}
+	return
+}
+
+func (o *NsTypeResolver) getTypeName(typeName string, buildNotAvailable bool) (ret string) {
+	ret = o.NameToGoType[typeName]
+	if ret == "" && buildNotAvailable {
+		ret = o.BuildGoType(o.Schema.TargetNamespace, typeName)
+		o.RegisterType(typeName, ret)
 	}
 	return
 }
@@ -296,7 +241,7 @@ func (o *NsTypeResolver) findTypeNameFull(nsName string, buildNotAvailable bool)
 func (o *NsTypeResolver) getTypeNameFull(typeName string, buildNotAvailable bool) (ret string) {
 	ret = o.NameToGoTypeFull[typeName]
 	if ret == "" && buildNotAvailable {
-		ret = o.Resolver.BuildGoType(o.Schema.TargetNamespace, typeName)
+		ret = o.BuildGoType(o.Schema.TargetNamespace, typeName)
 	}
 	return
 }
@@ -317,7 +262,29 @@ func (o *NsTypeResolver) RegisterTypeExternal(name string, typeName string) {
 	o.NameToGoTypeFull[name] = typeName
 }
 
-func NormalizeTypeName(name string) (ret string) {
-	ret = makePublic(name)
+func (o *NsTypeResolver) BuildGoType(namespace string, typeName string) (ret string) {
+	ret = xsd2GoTypes[strings.ToLower(typeName)]
+
+	if ret == "" {
+		ret = NormalizeTypeName(typeName)
+		if o.isMyNamespace(namespace) {
+			goPackage := o.Resolver.NamespaceToPackage[namespace]
+			if goPackage != "" {
+				ret = fmt.Sprintf("%v.%v", goPackage, ret)
+			} else {
+				log.Printf("no package for namespace found: %v, %v", namespace, typeName)
+			}
+		}
+	}
+	return
+}
+
+func (o *NsTypeResolver) isMyNamespace(namespace string) bool {
+	return namespace == "" || namespace == o.Schema.TargetNamespace
+}
+
+func NormalizeTypeName(typeName string) (ret string) {
+	ret = strcase.ToCamel(typeName)
+	ret = replaceReservedWords(makePublic(ret))
 	return ret
 }
