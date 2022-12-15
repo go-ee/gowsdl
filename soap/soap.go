@@ -437,7 +437,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request interface{
 
 	bodyReader := res.Body
 	if s.opts.Debug {
-		fmt.Printf("\n=== Generate: Debug Response ===\n")
+		fmt.Printf("\n=== Start: Debug Response ===\n")
 		buf := new(bytes.Buffer)
 		_, err = buf.ReadFrom(bodyReader)
 		bodyReader = io.NopCloser(bytes.NewReader(buf.Bytes()))

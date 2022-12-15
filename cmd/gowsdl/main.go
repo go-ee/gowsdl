@@ -107,7 +107,7 @@ func generate() (err error) {
 		wsdlPath, *filePrefix,
 		strings.TrimSpace(*dir),
 		strings.TrimSpace(*pkg),
-		*insecure, *makePublic); err != nil {
+		*insecure, *makePublic, map[string]string{}); err != nil {
 		return
 	}
 

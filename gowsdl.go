@@ -10,6 +10,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/iancoleman/strcase"
 	"go/format"
 	"io/ioutil"
 	"log"
@@ -26,6 +27,22 @@ import (
 
 const maxRecursion uint8 = 20
 
+var nsFileNameReplacements = map[string]string{
+	"https://": "",
+	"http://":  "",
+	"-":        "_",
+}
+
+var nsPkgReplacements = map[string]string{
+	"https://":        "",
+	"http://":         "",
+	"-":               "",
+	"ws.polarion.com": "ws",
+	"webservice":      "",
+	"impl":            "",
+	"types":           "",
+}
+
 // GoWSDL defines the struct for WSDL generator.
 type GoWSDL struct {
 	filePrefix            string
@@ -39,6 +56,7 @@ type GoWSDL struct {
 	resolvedXSDExternals  map[string]bool
 	currentRecursionLevel uint8
 	typeResolver          *TypeResolver
+	nsPkgReplacements     map[string]string
 }
 
 var cacheDir = filepath.Join(os.TempDir(), "gowsdl-cache")
@@ -86,7 +104,7 @@ func downloadFile(url string, ignoreTLS bool) ([]byte, error) {
 
 // NewGoWSDL initializes WSDL generator.
 func NewGoWSDL(wsdlFile, filePrefix string,
-	dir string, pkg string, ignoreTLS bool, exportAllTypes bool) (ret *GoWSDL, err error) {
+	dir string, pkg string, ignoreTLS bool, exportAllTypes bool, nsPkgReplacements map[string]string) (ret *GoWSDL, err error) {
 
 	wsdlFile = strings.TrimSpace(wsdlFile)
 	if wsdlFile == "" {
@@ -357,7 +375,7 @@ func (g *GoWSDL) writeFile(localFilePrefix string, targetNamespace string, sourc
 
 	var file *os.File
 	targetFile := filepath.Join(targetFolder,
-		g.filePrefix+localFilePrefix+g.typeResolver.NamespaceToPackage[targetNamespace]+".go")
+		g.filePrefix+localFilePrefix+g.typeResolver.NamespaceToFileName[targetNamespace]+".go")
 
 	log.Printf("generate : %v, %v\n", targetNamespace, targetFile)
 	if file, err = os.Create(targetFile); err != nil {
@@ -370,30 +388,32 @@ func (g *GoWSDL) writeFile(localFilePrefix string, targetNamespace string, sourc
 }
 
 func NamespaceToPackageRelative(namespace string) (ret string) {
-	ret = namespace
-	ret = strings.TrimPrefix(ret, "https://")
-	ret = strings.TrimPrefix(ret, "http://")
-	ret = strings.ToLower(ret)
-	ret = strings.ReplaceAll(ret, "webservice", "")
-	//ret = strings.ReplaceAll(ret, ".", "")
-	ret = strings.ReplaceAll(ret, "-", "")
+	ret = strings.ToLower(namespace)
+	for org, rep := range nsPkgReplacements {
+		ret = strings.ReplaceAll(ret, org, rep)
+	}
+	ret = strings.TrimSpace(ret)
+	ret = strings.TrimPrefix(ret, "/")
+	ret = strings.TrimSuffix(ret, "/")
 	return
 }
 
-func NamespaceToPackage(namespace string) (ret string) {
-	ret = NamespaceToPackageRelative(namespace)
-	ret = PackageLast(ret)
-	return
-}
-
-func PackageLast(packageFull string) string {
+func PackageLast(packageFull string) (ret string) {
 	parts := strings.Split(packageFull, "/")
-	packageFull = parts[len(parts)-1]
-	return packageFull
+	ret = parts[len(parts)-1]
+	if ret == "" {
+		ret = parts[len(parts)-2]
+	}
+	return
 }
 
 func NamespaceToFileName(namespace string) (ret string) {
-	ret = fmt.Sprintf("%v.go", NamespaceToPackage(namespace))
+	ret = PackageLast(namespace)
+	ret = strings.ToLower(ret)
+	for org, rep := range nsFileNameReplacements {
+		ret = strings.ReplaceAll(ret, org, rep)
+	}
+	ret = strcase.ToSnake(ret)
 	return
 }
 

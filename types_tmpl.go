@@ -124,13 +124,13 @@ var schemaTmpl = `
 {{end}}
 
 {{range .Elements}}
-	{{$name := .Name}}
-	{{$typeName := findTypeName $name }}
+	{{$name := .Name }}
+	{{$typeName := findTypeName .Name }}
 	{{if not .Type}}
 		{{/* ComplexTypeLocal */}}
 		{{with .ComplexType}}
 			type {{$typeName}} struct {
-				XMLName *xml.Name ` + "`xml:\"{{$targetNamespace}}\"`" + `
+				XMLName xml.Name
 				{{if ne .ComplexContent.Extension.Base ""}}
 					{{template "ComplexContent" .ComplexContent}}
 				{{else if ne .SimpleContent.Extension.Base ""}}
@@ -143,6 +143,9 @@ var schemaTmpl = `
 					{{template "Elements" .All}}
 					{{template "Attributes" .Attributes}}
 				{{end}}
+			}
+			func New{{$typeName}}() *{{$typeName}} {
+				return &{{$typeName}}{XMLName: xml.Name{Space: "{{$targetNamespace}}", Local: "{{$name}}"}}
 			}
 		{{end}}
 		{{/* SimpleTypeLocal */}}
@@ -205,13 +208,14 @@ var schemaTmpl = `
 
 {{range .ComplexTypes}}
 	{{/* ComplexTypeGlobal */}}
+	{{$name := .Name }}
 	{{$typeName := findTypeName .Name }}
 	{{ log "generate complex type" .Name "as" $typeName }}
 	{{if and (eq (len .SimpleContent.Extension.Attributes) 0) (eq (findTypeNillable .SimpleContent.Extension.Base true) "string") }}
 		type {{$typeName}} string
 	{{else}}
 		type {{$typeName}} struct {
-				XMLName *xml.Name ` + "`xml:\"{{$targetNamespace}}\"`" + `
+				XMLName xml.Name
 			{{if ne .ComplexContent.Extension.Base ""}}
 				{{template "ComplexContent" .ComplexContent}}
 			{{else if ne .SimpleContent.Extension.Base ""}}
@@ -224,6 +228,10 @@ var schemaTmpl = `
 				{{template "Elements" .All}}
 				{{template "Attributes" .Attributes}}
 			{{end}}
+		}
+
+		func New{{$typeName}}() *{{$typeName}} {
+			return &{{$typeName}}{XMLName: xml.Name{Space: "{{$targetNamespace}}", Local: "{{$name}}"}}
 		}
 	{{end}}
 {{end}}

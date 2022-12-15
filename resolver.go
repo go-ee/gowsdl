@@ -14,20 +14,19 @@ type TypeResolver struct {
 	NamespaceToPackageRelative map[string]string
 	NamespaceToPackageFull     map[string]string
 	NamespaceToPackage         map[string]string
+	NamespaceToFileName        map[string]string
 
 	namespaceToResolver map[string]*NsTypeResolver
 }
 
 func NewTypeResolver(packageBase string) *TypeResolver {
-	if packageBase != "" {
-		packageBase = packageBase + "/"
-	}
 	return &TypeResolver{
 		PackageBase:                packageBase,
 		NamespaceToResolver:        map[string]*NsTypeResolver{},
 		NamespaceToPackageRelative: map[string]string{},
 		NamespaceToPackageFull:     map[string]string{},
 		NamespaceToPackage:         map[string]string{},
+		NamespaceToFileName:        map[string]string{},
 		namespaceToResolver:        map[string]*NsTypeResolver{},
 	}
 }
@@ -44,8 +43,15 @@ func (o *TypeResolver) SetNamespaceToPackage(namespace string, nativePackage boo
 	if !nativePackage {
 		namespaceRelative := NamespaceToPackageRelative(namespace)
 		o.NamespaceToPackageRelative[namespace] = namespaceRelative
-		o.NamespaceToPackageFull[namespace] = fmt.Sprintf("%v%v", o.PackageBase, namespaceRelative)
-		o.NamespaceToPackage[namespace] = NamespaceToPackage(namespace)
+		var namespaceFull string
+		if namespaceRelative != "" {
+			namespaceFull = fmt.Sprintf("%v/%v", o.PackageBase, namespaceRelative)
+		} else {
+			namespaceFull = o.PackageBase
+		}
+		o.NamespaceToPackageFull[namespace] = namespaceFull
+		o.NamespaceToPackage[namespace] = PackageLast(namespaceFull)
+		o.NamespaceToFileName[namespace] = NamespaceToFileName(namespace)
 	} else {
 		o.NamespaceToPackageRelative[namespace] = ""
 		o.NamespaceToPackageFull[namespace] = ""
@@ -123,8 +129,10 @@ func (o *NsTypeResolver) GetGoImports() string {
 
 		var imp string
 		for _, namespace := range o.Schema.Xmlns {
-			if o.Schema.TargetNamespace != namespace {
-				imp = o.Resolver.NamespaceToPackageFull[namespace]
+			myPackage := o.Resolver.NamespaceToPackageFull[o.Schema.TargetNamespace]
+			targetPackage := o.Resolver.NamespaceToPackageFull[namespace]
+			if myPackage != targetPackage {
+				imp = targetPackage
 				if imp != "" {
 					buffer.WriteString("\"" + imp + "\"\n")
 				}
@@ -213,15 +221,16 @@ func (o *NsTypeResolver) OnMessage(msg *WSDLMessage) {
 
 func (o *NsTypeResolver) findTypeNameFull(nsName string, buildNotAvailable bool) (ret string) {
 	namespace, typeName := o.toNamespaceAndType(nsName)
-	if typeName == "ArrayOf_xsd_anyType" {
-		log.Printf(ret)
-	}
 	if o.isMyNamespace(namespace) {
 		ret = o.getTypeName(typeName, buildNotAvailable)
 	} else {
 		nsResolver := o.Resolver.NamespaceToResolver[namespace]
 		if nsResolver != nil {
-			ret = nsResolver.getTypeNameFull(typeName, buildNotAvailable)
+			if o.GetGoPackage() == nsResolver.GetGoPackage() {
+				ret = nsResolver.getTypeName(typeName, buildNotAvailable)
+			} else {
+				ret = nsResolver.getTypeNameFull(typeName, buildNotAvailable)
+			}
 		} else if buildNotAvailable {
 			ret = o.BuildGoType(namespace, typeName)
 		}
