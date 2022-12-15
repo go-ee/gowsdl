@@ -206,6 +206,7 @@ var schemaTmpl = `
 {{range .ComplexTypes}}
 	{{/* ComplexTypeGlobal */}}
 	{{$typeName := findTypeName .Name }}
+	{{ log "generate complex type" .Name "as" $typeName }}
 	{{if and (eq (len .SimpleContent.Extension.Attributes) 0) (eq (findTypeNillable .SimpleContent.Extension.Base true) "string") }}
 		type {{$typeName}} string
 	{{else}}

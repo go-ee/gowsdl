@@ -58,13 +58,12 @@ import (
 // Version is initialized in compilation time by go build.
 var Version string
 
-// Name is initialized in compilation time by go build.
-var Name string
+// name is initialized in compilation time by go build.
+var name string
 
 var vers = flag.Bool("v", false, "Shows gowsdl version")
-var filePrefix = flag.String("l", "", "File prefix, label")
+var filePrefix = flag.String("l", "myervice_", "File prefix, label")
 var pkg = flag.String("p", "myservice", "Package under which code will be generated")
-var outFile = flag.String("o", "myservice.go", "File where the generated code will be saved")
 var dir = flag.String("d", "./", "Directory under which service package directory will be created")
 var insecure = flag.Bool("i", false, "Skips TLS Verification")
 var makePublic = flag.Bool("make-public", true, "Make the generated types public/exported")
@@ -101,10 +100,6 @@ func main() {
 
 func generate() (err error) {
 	wsdlPath := os.Args[len(os.Args)-1]
-
-	if *outFile == wsdlPath {
-		log.Fatalln("Output file cannot be the same WSDL file")
-	}
 
 	// load wsdl
 	var wsdl *gowsdl.GoWSDL

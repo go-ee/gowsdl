@@ -85,12 +85,12 @@ func downloadFile(url string, ignoreTLS bool) ([]byte, error) {
 }
 
 // NewGoWSDL initializes WSDL generator.
-func NewGoWSDL(file, filePrefix string,
-	dirService string, pkgService string, ignoreTLS bool, exportAllTypes bool) (ret *GoWSDL, err error) {
+func NewGoWSDL(wsdlFile, filePrefix string,
+	dir string, pkg string, ignoreTLS bool, exportAllTypes bool) (ret *GoWSDL, err error) {
 
-	file = strings.TrimSpace(file)
-	if file == "" {
-		return nil, errors.New("WSDL file is required to generate Go proxy")
+	wsdlFile = strings.TrimSpace(wsdlFile)
+	if wsdlFile == "" {
+		return nil, errors.New("WSDL wsdlFile is required to generate Go proxy")
 	}
 
 	makePublicFn := func(id string) string { return id }
@@ -99,18 +99,18 @@ func NewGoWSDL(file, filePrefix string,
 	}
 
 	var location *Location
-	if location, err = ParseLocation(file); err != nil {
+	if location, err = ParseLocation(wsdlFile); err != nil {
 		return
 	}
 
 	ret = &GoWSDL{
 		filePrefix:   filePrefix,
-		dir:          dirService,
-		pkg:          pkgService,
+		dir:          dir,
+		pkg:          pkg,
 		location:     location,
 		ignoreTLS:    ignoreTLS,
 		makePublicFn: makePublicFn,
-		typeResolver: NewTypeResolver(pkgService),
+		typeResolver: NewTypeResolver(pkg),
 	}
 	return
 }
@@ -236,8 +236,8 @@ func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) error {
 }
 
 type Context struct {
-	currentResolver *NsTypeResolver
-	wsdl            *GoWSDL
+	resolver *NsTypeResolver
+	wsdl     *GoWSDL
 }
 
 func NewContext(wsdl *GoWSDL) (ret *Context) {
@@ -246,8 +246,13 @@ func NewContext(wsdl *GoWSDL) (ret *Context) {
 	return
 }
 
+func (o *Context) Log(messages ...string) string {
+	log.Printf("%v: %v\n", o.resolver.Schema.TargetNamespace, messages)
+	return ""
+}
+
 func (o *Context) FindTypeNillable(xsdType string, nillable bool) (ret string) {
-	return o.currentResolver.FindTypeNillable(xsdType, nillable)
+	return o.resolver.FindTypeNillable(xsdType, nillable)
 }
 
 func (o *Context) FindTypeNotNillable(xsdType string) (ret string) {
@@ -268,8 +273,8 @@ func (o *Context) removePackage(ret string) string {
 }
 
 func (o *Context) setNS(ns string) string {
-	o.currentResolver = o.wsdl.typeResolver.GetResolverForNamespace(ns)
-	if o.currentResolver == nil {
+	o.resolver = o.wsdl.typeResolver.GetResolverForNamespace(ns)
+	if o.resolver == nil {
 		log.Fatalf("namespace not registered: %v", ns)
 	}
 	return o.getNS()
@@ -277,27 +282,28 @@ func (o *Context) setNS(ns string) string {
 
 // Method setNS returns the currently active XML namespace.
 func (o *Context) getNS() string {
-	return o.currentResolver.Schema.TargetNamespace
+	return o.resolver.Schema.TargetNamespace
 }
 
 // Given a type, check if there's an Element with that type, and return its name.
 func (o *Context) findNameByType(name string) (ret string) {
-	ret = o.currentResolver.FindTypeNillable(name, true)
+	ret = o.resolver.FindTypeNillable(name, true)
 	//return newTraverser(nil, g.wsdl.Types.Schemas).findNameByType(name)
 	return
 }
 
 func (o *Context) goPackage() (ret string) {
-	return o.currentResolver.GetGoPackage()
+	return o.resolver.GetGoPackage()
 }
 
 func (o *Context) goImports() (ret string) {
-	return o.currentResolver.GetGoImports()
+	return o.resolver.GetGoImports()
 }
 
 func (g *GoWSDL) genTypes() (err error) {
 	context := NewContext(g)
 	funcMap := template.FuncMap{
+		"log":                      context.Log,
 		"findTypeNillable":         context.FindTypeNillable,
 		"findType":                 context.FindTypeNotNillable,
 		"findTypeName":             context.FindTypeName,
@@ -338,19 +344,21 @@ func (g *GoWSDL) genTypes() (err error) {
 	}
 
 	for namespace, data := range schemaToContent {
-		if err = g.writeFile(namespace, g.formatSource(data), ""); err != nil {
+		if err = g.writeFile("types_", namespace, g.formatSource(data), ""); err != nil {
 			return
 		}
 	}
 	return
 }
 
-func (g *GoWSDL) writeFile(targetNamespace string, source []byte, subDir string) (err error) {
+func (g *GoWSDL) writeFile(localFilePrefix string, targetNamespace string, source []byte, subDir string) (err error) {
 	targetFolder := filepath.Join(g.dir, g.typeResolver.NamespaceToPackageRelative[targetNamespace], subDir)
 	err = os.MkdirAll(targetFolder, 0744)
 
 	var file *os.File
-	targetFile := filepath.Join(targetFolder, g.filePrefix+g.typeResolver.NamespaceToPackage[targetNamespace]+".go")
+	targetFile := filepath.Join(targetFolder,
+		g.filePrefix+localFilePrefix+g.typeResolver.NamespaceToPackage[targetNamespace]+".go")
+
 	log.Printf("generate : %v, %v\n", targetNamespace, targetFile)
 	if file, err = os.Create(targetFile); err != nil {
 		return
@@ -413,7 +421,7 @@ func (g *GoWSDL) genService() (err error) {
 		return
 	}
 
-	err = g.writeFile(g.wsdl.TargetNamespace, g.formatSource(data), "")
+	err = g.writeFile("service_", g.wsdl.TargetNamespace, g.formatSource(data), "")
 
 	return
 }
@@ -444,7 +452,7 @@ func (g *GoWSDL) genServer() (err error) {
 	tmpl = template.Must(template.New("Server").Funcs(funcMap).Parse(serverTmpl))
 	err = tmpl.Execute(data, g.wsdl.PortTypes)
 
-	err = g.writeFile(g.wsdl.TargetNamespace, g.formatSource(data), subDir)
+	err = g.writeFile("server_", g.wsdl.TargetNamespace, g.formatSource(data), subDir)
 	return
 }
 
