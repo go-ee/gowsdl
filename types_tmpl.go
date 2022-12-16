@@ -60,7 +60,12 @@ var schemaTmpl = `
 	{{range .}}
 		{{if .Doc}} {{.Doc | comment}} {{end}}
 		{{ if ne .Type "" }}
-			{{ normalize .Name | makeFieldPublic}} {{findTypeNillable .Type false}} ` + "`" + `xml:"{{.Name}},attr,omitempty" json:"{{.Name}},omitempty"` + "`" + `
+			{{ $type := findTypeNillable .Type false }}
+			{{ if ne $type "bool" }}
+				{{ normalize .Name | makeFieldPublic}} {{$type}} ` + "`" + `xml:"{{.Name}},attr,omitempty" json:"{{.Name}},omitempty"` + "`" + `
+			{{ else }}
+				{{ normalize .Name | makeFieldPublic}} {{$type}} ` + "`" + `xml:"{{.Name}},attr" json:"{{.Name}}"` + "`" + `
+			{{ end }}
 		{{ else }}
 			{{ normalize .Name | makeFieldPublic}} string ` + "`" + `xml:"{{.Name}},attr,omitempty" json:"{{.Name}},omitempty"` + "`" + `
 		{{ end }}
@@ -108,7 +113,12 @@ var schemaTmpl = `
 			{{end}}
 		{{else}}
 			{{if .Doc}}{{.Doc | comment}} {{end}}
-			{{replaceAttrReservedWords .Name | makeFieldPublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{findTypeNillable .Type true }} ` + "`" + `xml:"{{.Name}},omitempty" json:"{{.Name}},omitempty"` + "`" + ` {{end}}
+			{{ $type := findTypeNillable .Type true }}
+			{{ if ne $type "bool" }}
+				{{replaceAttrReservedWords .Name | makeFieldPublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{$type}} ` + "`" + `xml:"{{.Name}},omitempty" json:"{{.Name}},omitempty"` + "`" + `
+			{{ else }}
+				{{replaceAttrReservedWords .Name | makeFieldPublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{$type}} ` + "`" + `xml:"{{.Name}}" json:"{{.Name}}"` + "`" + `
+			{{ end }}{{end}}
 		{{end}}
 	{{end}}
 {{end}}
@@ -144,8 +154,11 @@ var schemaTmpl = `
 					{{template "Attributes" .Attributes}}
 				{{end}}
 			}
+			func New{{$typeName}}As(tagName string) *{{$typeName}} {
+				return &{{$typeName}}{XMLName: xml.Name{Space: "{{$targetNamespace}}", Local: tagName}}
+			}
 			func New{{$typeName}}() *{{$typeName}} {
-				return &{{$typeName}}{XMLName: xml.Name{Space: "{{$targetNamespace}}", Local: "{{$name}}"}}
+				return New{{$typeName}}As("{{$name}}")
 			}
 		{{end}}
 		{{/* SimpleTypeLocal */}}
@@ -230,8 +243,11 @@ var schemaTmpl = `
 			{{end}}
 		}
 
+		func New{{$typeName}}As(tagName string) *{{$typeName}} {
+			return &{{$typeName}}{XMLName: xml.Name{Space: "{{$targetNamespace}}", Local: tagName}}
+		}
 		func New{{$typeName}}() *{{$typeName}} {
-			return &{{$typeName}}{XMLName: xml.Name{Space: "{{$targetNamespace}}", Local: "{{$name}}"}}
+			return New{{$typeName}}As("{{$name}}")
 		}
 	{{end}}
 {{end}}
