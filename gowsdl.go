@@ -448,7 +448,6 @@ func (g *GoWSDL) genService() (err error) {
 }
 
 func (g *GoWSDL) genServer() (err error) {
-	subDir := "mock"
 	context := NewContext(g)
 	funcMap := template.FuncMap{
 		"findTypeNillable":     context.FindTypeNillable,
@@ -460,7 +459,7 @@ func (g *GoWSDL) genServer() (err error) {
 		"findSOAPAction":       g.findSOAPAction,
 		"findServiceAddress":   g.findServiceAddress,
 		"comment":              comment,
-		"goPackage":            func() string { return subDir },
+		"goPackage":            context.goPackage,
 		"goImports":            context.goImports,
 	}
 
@@ -473,7 +472,7 @@ func (g *GoWSDL) genServer() (err error) {
 	tmpl = template.Must(template.New("Server").Funcs(funcMap).Parse(serverTmpl))
 	err = tmpl.Execute(data, g.wsdl.PortTypes)
 
-	err = g.writeFile("server_", g.wsdl.TargetNamespace, g.formatSource(data), subDir)
+	err = g.writeFile("server_", g.wsdl.TargetNamespace, g.formatSource(data), "")
 	return
 }
 
