@@ -55,26 +55,74 @@ var schemaTmpl = `
 	{{template "Attributes" .Extension.Attributes}}
 {{end}}
 
+{{define "ComplexContentWith"}}
+	{{ $items := get . "items" }}
+	{{ $typeName := get . "typeName" }}
+
+	{{ $baseType := findTypeNillable $items.Extension.Base false }}
+	{{ if $baseType }}
+		{{ $fieldName := $baseType }}
+		{{ $paramName := $fieldName | untitle }}
+		func (o *{{ $typeName }}) With{{ $fieldName }}({{ $paramName }} *{{ $baseType }}) *{{ $typeName }} {
+			o.{{ $fieldName }} = {{ $paramName }}
+			return o
+		}
+	{{end}}
+
+	{{template "ElementsWith" dict "items" $items.Extension.Sequence "typeName" $typeName }}
+	{{template "ElementsWith" dict "items" $items.Extension.Choice "typeName" $typeName }}
+	{{template "ElementsWith" dict "items" $items.Extension.SequenceChoice "typeName" $typeName }}
+	{{template "AttributesWith" dict "items" $items.Extension.Attributes "typeName" $typeName}}
+{{end}}
+
 {{define "Attributes"}}
     {{ $targetNamespace := getNS }}
 	{{range .}}
 		{{if .Doc}} {{.Doc | comment}} {{end}}
+		{{ $type := "string" }}
 		{{ if ne .Type "" }}
-			{{ $type := findTypeNillable .Type false }}
-			{{ if ne $type "bool" }}
-				{{ normalize .Name | makeFieldPublic}} {{$type}} ` + "`" + `xml:"{{.Name}},attr,omitempty" json:"{{.Name}},omitempty"` + "`" + `
-			{{ else }}
-				{{ normalize .Name | makeFieldPublic}} {{$type}} ` + "`" + `xml:"{{.Name}},attr" json:"{{.Name}}"` + "`" + `
-			{{ end }}
-		{{ else }}
-			{{ normalize .Name | makeFieldPublic}} string ` + "`" + `xml:"{{.Name}},attr,omitempty" json:"{{.Name}},omitempty"` + "`" + `
+			{{ $type = findTypeNillable .Type false }}
 		{{ end }}
+		{{ if ne $type "bool" }}
+			{{ normalize .Name | makeFieldPublic}} {{$type}} ` + "`" + `xml:"{{.Name}},attr,omitempty" json:"{{.Name}},omitempty"` + "`" + `
+		{{ else }}
+			{{ normalize .Name | makeFieldPublic}} {{$type}} ` + "`" + `xml:"{{.Name}},attr" json:"{{.Name}}"` + "`" + `
+		{{ end }}
+	{{end}}
+{{end}}
+
+{{define "AttributesWith"}}
+	{{ $items := get . "items" }}
+	{{ $typeName := get . "typeName" }}
+	{{ range $items }}
+    	{{ $type := "string" }}
+		{{ if ne .Type "" }}
+			{{ $type = findTypeNillable .Type false }}
+		{{ end }}
+		{{ $fieldName := normalize .Name | makeFieldPublic }}
+		{{ $paramName := $fieldName | untitle }}
+		func (o *{{ $typeName }}) With{{ $fieldName  }}({{ $paramName }} {{ $type }}) *{{ $typeName }} {
+			o.{{ $fieldName }} = {{ $paramName }}
+			return o
+		}
 	{{end}}
 {{end}}
 
 {{define "SimpleContent"}}
 	Value {{findTypeNillable .Extension.Base true}} ` + "`xml:\",chardata\" json:\"-,\"`" + `
 	{{template "Attributes" .Extension.Attributes}}
+{{end}}
+
+{{define "SimpleContentWith"}}
+	{{ $items := get . "items" }}
+	{{ $typeName := get . "typeName" }}
+	{{ $fieldName := "Value" }}
+	{{ $paramName := $fieldName | untitle }}
+	func (o *{{ $typeName }}) With{{ $fieldName }}({{ $paramName }} {{ findTypeNillable .Extension.Base true }}) *{{ $typeName }} {
+		o.{{ $fieldName }} = {{ $paramName }}
+		return o
+	}
+	{{template "AttributesWith" dict "items" $items.Extension.Attributes "typeName" $typeName}}
 {{end}}
 
 {{define "ComplexTypeInline"}}
@@ -123,9 +171,63 @@ var schemaTmpl = `
 	{{end}}
 {{end}}
 
+{{define "ElementsWith"}}
+	{{ $items := get . "items" }}
+	{{ $typeName := get . "typeName" }}
+	{{ range $items }}
+		{{if ne .Ref ""}}
+			{{ $fieldName := removeNS .Ref | replaceReservedWords | makeFieldPublic }}
+			{{ $paramName := $fieldName | untitle }}
+			func (o *{{ $typeName }}) With{{ $fieldName }}({{ $paramName }} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{ findTypeNillable .Ref true }}) *{{ $typeName }} {
+				o.{{ $fieldName }} = {{ $paramName }}
+				return o
+			}
+		{{else}}
+		{{if not .Type}}
+			{{if .SimpleType}}
+				{{if ne .SimpleType.List.ItemType ""}}
+					{{ $fieldName := normalize .Name | replaceReservedWords | makeFieldPublic }}
+					{{ $paramName := $fieldName | untitle }}
+					func (o *{{ $typeName }}) With{{ $fieldName }}({{ $paramName }} []{{ findTypeNillable .SimpleType.List.ItemType true }}) *{{ $typeName }} {
+						o.{{ $fieldName }} = {{ $paramName }}
+						return o
+					}
+				{{else}}
+					{{ $fieldName := normalize .Name | replaceReservedWords | makeFieldPublic }}
+					{{ $paramName := $fieldName | untitle }}
+					func (o *{{ $typeName }}) With{{ $fieldName }}({{ $paramName }} {{ findTypeNillable .SimpleType.Restriction.Base true }}) *{{ $typeName }} {
+						o.{{ $fieldName }} = {{ $paramName }}
+						return o
+					}
+				{{end}}
+			{{end}}
+		{{else}}
+			{{ $fieldName := replaceAttrReservedWords .Name | makeFieldPublic }}
+			{{ $paramName := $fieldName | untitle }}
+			func (o *{{ $typeName }}) With{{ $fieldName  }}({{ $paramName }} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{ findTypeNillable .Type true }}) *{{ $typeName }} {
+				o.{{ $fieldName }} = {{ $paramName }}
+				return o
+			}{{end}}
+		{{end}}
+	{{end}}
+{{end}}
+
 {{define "Any"}}
 	{{range .}}
 		Items     []string ` + "`" + `xml:",any" json:"items,omitempty"` + "`" + `
+	{{end}}
+{{end}}
+
+{{define "AnyWith"}}
+	{{ $items := get . "items" }}
+	{{ $typeName := get . "typeName" }}
+	{{ range $items }}
+		{{ $fieldName := "Items" }}
+		{{ $paramName := "items" }}
+		func (o *{{ $typeName }}) With{{ $fieldName  }}({{ $paramName }} []sting) *{{ $typeName }} {
+			o.{{ $fieldName }} = {{ $paramName }}
+			return o
+		}
 	{{end}}
 {{end}}
 
@@ -160,6 +262,18 @@ var schemaTmpl = `
 			func New{{$typeName}}() *{{$typeName}} {
 				return New{{$typeName}}As("{{$name}}")
 			}
+			{{if ne .ComplexContent.Extension.Base ""}}
+				{{ template "ComplexContentWith" dict "items" .ComplexContent "typeName" $typeName }}
+			{{else if ne .SimpleContent.Extension.Base ""}}
+				{{ template "SimpleContentWith" dict "items" .SimpleContent "typeName" $typeName }}
+			{{else}}
+				{{ template "ElementsWith" dict "items" .Sequence "typeName" $typeName }}
+				{{ template "AnyWith" dict "items" .Any "typeName" $typeName }}
+				{{ template "ElementsWith" dict "items" .Choice "typeName" $typeName }}
+				{{ template "ElementsWith" dict "items" .SequenceChoice "typeName" $typeName }}
+				{{ template "ElementsWith" dict "items" .All "typeName" $typeName }}
+				{{ template "AttributesWith" dict "items" .Attributes "typeName" $typeName }}
+			{{end}}
 		{{end}}
 		{{/* SimpleTypeLocal */}}
 		{{with .SimpleType}}
@@ -249,6 +363,18 @@ var schemaTmpl = `
 		func New{{$typeName}}() *{{$typeName}} {
 			return New{{$typeName}}As("{{$name}}")
 		}
+		{{if ne .ComplexContent.Extension.Base ""}}
+			{{ template "ComplexContentWith" dict "items" .ComplexContent "typeName" $typeName }}
+		{{else if ne .SimpleContent.Extension.Base ""}}
+			{{ template "SimpleContentWith" dict "items" .SimpleContent "typeName" $typeName }}
+		{{else}}
+			{{ template "ElementsWith" dict "items" .Sequence "typeName" $typeName }}
+			{{ template "AnyWith" dict "items" .Any "typeName" $typeName }}
+			{{ template "ElementsWith" dict "items" .Choice "typeName" $typeName }}
+			{{ template "ElementsWith" dict "items" .SequenceChoice "typeName" $typeName }}
+			{{ template "ElementsWith" dict "items" .All "typeName" $typeName }}
+			{{ template "AttributesWith" dict "items" .Attributes "typeName" $typeName }}
+		{{end}}
 	{{end}}
 {{end}}
 

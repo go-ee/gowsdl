@@ -10,6 +10,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/Masterminds/sprig/v3"
 	"github.com/iancoleman/strcase"
 	"go/format"
 	"io/ioutil"
@@ -343,7 +344,7 @@ func (g *GoWSDL) genTypes() (err error) {
 	schemaToContent := map[string]*bytes.Buffer{}
 
 	tmplHeader := template.Must(template.New("TypesHeader").Funcs(funcMap).Parse(schemaHeader))
-	tmplBody := template.Must(template.New("TypesBody").Funcs(funcMap).Parse(schemaTmpl))
+	tmplBody := template.Must(template.New("TypesBody").Funcs(sprig.FuncMap()).Funcs(funcMap).Parse(schemaTmpl))
 
 	for _, schema := range g.wsdl.Types.Schemas {
 		context.setNS(schema.TargetNamespace)
