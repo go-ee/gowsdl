@@ -427,7 +427,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request interface{
 
 	if s.opts.Debug {
 		fmt.Printf("\n=== Start: Debug Request ===\n")
-		fmt.Printf("\nrequest: body=%v, header=%v\n", buffer.String(), req.Header)
+		fmt.Printf("\nrequest: url=%v, header=%v, body=%v\n", req.URL, req.Header, buffer.String())
 		fmt.Printf("\n=== End: Debug Request===\n")
 	}
 

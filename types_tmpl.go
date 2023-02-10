@@ -182,6 +182,11 @@ var schemaTmpl = `
 				o.{{ $fieldName }} = {{ $paramName }}
 				return o
 			}
+
+			{{if eq .MaxOccurs "unbounded"}}func (o *{{ $typeName }}) With{{ $fieldName }}Append({{ $paramName }} {{ findTypeNillable .Ref true }}) *{{ $typeName }} {
+				o.{{ $fieldName }} = append(o.{{ $fieldName }}, {{ $paramName }})
+				return o
+			}{{end}}
 		{{else}}
 		{{if not .Type}}
 			{{if .SimpleType}}
@@ -190,6 +195,11 @@ var schemaTmpl = `
 					{{ $paramName := $fieldName | untitle }}
 					func (o *{{ $typeName }}) With{{ $fieldName }}({{ $paramName }} []{{ findTypeNillable .SimpleType.List.ItemType true }}) *{{ $typeName }} {
 						o.{{ $fieldName }} = {{ $paramName }}
+						return o
+					}
+
+					func (o *{{ $typeName }}) With{{ $fieldName }}Append({{ $paramName }} {{ findTypeNillable .SimpleType.List.ItemType true }}) *{{ $typeName }} {
+						o.{{ $fieldName }} = append(o.{{ $fieldName }}, {{ $paramName }})
 						return o
 					}
 				{{else}}
@@ -207,7 +217,11 @@ var schemaTmpl = `
 			func (o *{{ $typeName }}) With{{ $fieldName  }}({{ $paramName }} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{ findTypeNillable .Type true }}) *{{ $typeName }} {
 				o.{{ $fieldName }} = {{ $paramName }}
 				return o
-			}{{end}}
+			}
+			{{if eq .MaxOccurs "unbounded"}}func (o *{{ $typeName }}) With{{ $fieldName }}Append({{ $paramName }} {{ findTypeNillable .Type true }}) *{{ $typeName }} {
+				o.{{ $fieldName }} = append(o.{{ $fieldName }}, {{ $paramName }})
+				return o
+			}{{end}}{{end}}
 		{{end}}
 	{{end}}
 {{end}}
@@ -226,6 +240,11 @@ var schemaTmpl = `
 		{{ $paramName := "items" }}
 		func (o *{{ $typeName }}) With{{ $fieldName  }}({{ $paramName }} []sting) *{{ $typeName }} {
 			o.{{ $fieldName }} = {{ $paramName }}
+			return o
+		}
+
+		func (o *{{ $typeName }}) With{{ $fieldName  }}Append({{ $paramName }} sting) *{{ $typeName }} {
+			o.{{ $fieldName }} = append(o.{{ $fieldName }}, {{ $paramName }})
 			return o
 		}
 	{{end}}
