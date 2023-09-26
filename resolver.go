@@ -97,8 +97,8 @@ type NsTypeResolver struct {
 	NameToGoType     map[string]string
 	NameToGoTypeFull map[string]string
 
-	goPackage string
-	goImports string
+	GoPackage string
+	GoImports string
 }
 
 func NewNsTypeResolver(schema *XSDSchema, resolver *TypeResolver, goPackage string) (ret *NsTypeResolver) {
@@ -113,16 +113,16 @@ func NewNsTypeResolver(schema *XSDSchema, resolver *TypeResolver, goPackage stri
 	} else {
 		resolver.NamespaceToResolver[""] = ret
 	}
-	ret.goPackage = goPackage
+	ret.GoPackage = goPackage
 	return
 }
 
 func (o *NsTypeResolver) GetGoPackage() string {
-	return o.goPackage
+	return o.GoPackage
 }
 
 func (o *NsTypeResolver) GetGoImports() string {
-	if o.goImports == "" {
+	if o.GoImports == "" {
 		buffer := bytes.Buffer{}
 		buffer.WriteString("\"encoding/xml\"\n")
 		buffer.WriteString("\"github.com/hooklift/gowsdl/soap\"\n")
@@ -138,9 +138,9 @@ func (o *NsTypeResolver) GetGoImports() string {
 				}
 			}
 		}
-		o.goImports = buffer.String()
+		o.GoImports = buffer.String()
 	}
-	return o.goImports
+	return o.GoImports
 }
 
 func (o *NsTypeResolver) FindTypeNillable(xsdType string, nillable bool) (ret string) {
@@ -258,8 +258,8 @@ func (o *NsTypeResolver) getTypeNameFull(typeName string, buildNotAvailable bool
 func (o *NsTypeResolver) RegisterType(name string, typeName string) {
 	//log.Printf("register %v: %v", o.Schema.TargetNamespace, name)
 	o.NameToGoType[name] = typeName
-	if o.goPackage != "" {
-		o.NameToGoTypeFull[name] = fmt.Sprintf("%v.%v", o.goPackage, typeName)
+	if o.GoPackage != "" {
+		o.NameToGoTypeFull[name] = fmt.Sprintf("%v.%v", o.GoPackage, typeName)
 	} else {
 		o.NameToGoTypeFull[name] = typeName
 	}

@@ -154,6 +154,10 @@ func (g *GoWSDL) Generate() (err error) {
 	if err = g.genServer(); err != nil {
 		return
 	}
+
+	if err = g.genTypeResolver(); err != nil {
+		return
+	}
 	return
 }
 
@@ -337,8 +341,8 @@ func (g *GoWSDL) genTypes() (err error) {
 		"goString":                 goString,
 		"removePointerFromType":    removePointerFromType,
 		"getNS":                    context.getNS,
-		"goPackage":                context.goPackage,
-		"goImports":                context.goImports,
+		"GoPackage":                context.goPackage,
+		"GoImports":                context.goImports,
 	}
 
 	schemaToContent := map[string]*bytes.Buffer{}
@@ -432,8 +436,8 @@ func (g *GoWSDL) genService() (err error) {
 		"findSOAPAction":       g.findSOAPAction,
 		"findServiceAddress":   g.findServiceAddress,
 		"comment":              comment,
-		"goPackage":            context.goPackage,
-		"goImports":            context.goImports,
+		"GoPackage":            context.goPackage,
+		"GoImports":            context.goImports,
 	}
 
 	data := new(bytes.Buffer)
@@ -459,8 +463,8 @@ func (g *GoWSDL) genServer() (err error) {
 		"findSOAPAction":       g.findSOAPAction,
 		"findServiceAddress":   g.findServiceAddress,
 		"comment":              comment,
-		"goPackage":            context.goPackage,
-		"goImports":            context.goImports,
+		"GoPackage":            context.goPackage,
+		"GoImports":            context.goImports,
 	}
 
 	data := new(bytes.Buffer)
@@ -473,6 +477,35 @@ func (g *GoWSDL) genServer() (err error) {
 	err = tmpl.Execute(data, g.wsdl.PortTypes)
 
 	err = g.writeFile("server_", g.wsdl.TargetNamespace, g.formatSource(data), "")
+	return
+}
+
+func (g *GoWSDL) genTypeResolver() (err error) {
+	context := NewContext(g)
+	funcMap := template.FuncMap{
+		"findTypeNillable":     context.FindTypeNillable,
+		"findType":             context.FindTypeNotNillable,
+		"findTypeName":         context.FindTypeName,
+		"stripns":              stripns,
+		"replaceReservedWords": replaceReservedWords,
+		"normalize":            normalize,
+		"makePublic":           g.makePublicFn,
+		"makePrivate":          makePrivate,
+		"findSOAPAction":       g.findSOAPAction,
+		"findServiceAddress":   g.findServiceAddress,
+		"comment":              comment,
+		"GoPackage":            context.goPackage,
+		"GoImports":            context.goImports,
+	}
+
+	data := new(bytes.Buffer)
+	tmpl := template.Must(template.New("TypesResolver").Funcs(funcMap).Parse(typesResolvers))
+	if err = tmpl.Execute(data, g.typeResolver); err != nil {
+		return
+	}
+
+	err = g.writeFile("typesresolver_", g.wsdl.TargetNamespace, g.formatSource(data), "")
+
 	return
 }
 
