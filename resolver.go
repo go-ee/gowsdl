@@ -285,6 +285,9 @@ func (o *NsTypeResolver) BuildGoType(namespace string, typeName string) (ret str
 			}
 		}
 	}
+	if strings.Contains(ret, "URI") {
+		fmt.Printf("", ret)
+	}
 	return
 }
 
@@ -294,6 +297,9 @@ func (o *NsTypeResolver) isMyNamespace(namespace string) bool {
 
 func NormalizeTypeName(typeName string) (ret string) {
 	ret = strcase.ToCamel(typeName)
+	if strings.Contains(ret, "URI") {
+		fmt.Printf("", ret)
+	}
 	ret = replaceReservedWords(makePublic(ret))
 	return ret
 }

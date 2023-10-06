@@ -240,7 +240,7 @@ func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) error {
 	for _, impts := range schema.Imports {
 		// Download the file only if we have a hint in the form of schemaLocation.
 		if impts.SchemaLocation == "" {
-			//log.Printf("[DEBUG] Don't know where to find XSD for %s", impts.Namespace)
+			//log.Printf("[DEBUG] Don't know where to find XSD for %s", impts.Label)
 			continue
 		}
 
@@ -482,30 +482,41 @@ func (g *GoWSDL) genServer() (err error) {
 
 func (g *GoWSDL) genTypeResolver() (err error) {
 	context := NewContext(g)
-	funcMap := template.FuncMap{
-		"findTypeNillable":     context.FindTypeNillable,
-		"findType":             context.FindTypeNotNillable,
-		"findTypeName":         context.FindTypeName,
-		"stripns":              stripns,
-		"replaceReservedWords": replaceReservedWords,
-		"normalize":            normalize,
-		"makePublic":           g.makePublicFn,
-		"makePrivate":          makePrivate,
-		"findSOAPAction":       g.findSOAPAction,
-		"findServiceAddress":   g.findServiceAddress,
-		"comment":              comment,
-		"GoPackage":            context.goPackage,
-		"GoImports":            context.goImports,
+	namespaceTypes := g.buildNamespaceTypes(context.goPackage())
+	if len(namespaceTypes) > 0 {
+		funcMap := template.FuncMap{
+			"goPackage":     context.goPackage,
+			"goPackageBase": func() string { return fmt.Sprintf("%v/ws", g.pkg) },
+			"goImports":     context.goImports,
+		}
+
+		data := new(bytes.Buffer)
+		tmpl := template.Must(template.New("TypesResolver").Funcs(funcMap).Parse(typesResolvers))
+		if err = tmpl.Execute(data, namespaceTypes); err != nil {
+			return
+		}
+		err = g.writeFile("typesresolver_", g.wsdl.TargetNamespace, g.formatSource(data), "")
 	}
+	return
+}
 
-	data := new(bytes.Buffer)
-	tmpl := template.Must(template.New("TypesResolver").Funcs(funcMap).Parse(typesResolvers))
-	if err = tmpl.Execute(data, g.typeResolver); err != nil {
-		return
+func (g *GoWSDL) buildNamespaceTypes(goPackage string) (ret map[string]map[string]string) {
+	ret = map[string]map[string]string{}
+	for namespace, typeResolver := range g.typeResolver.NamespaceToResolver {
+		if goPackage != typeResolver.GoPackage {
+			continue
+		}
+
+		types := map[string]string{}
+		for name, goType := range typeResolver.NameToGoType {
+			if len(name) > 0 && !strings.HasPrefix(name, "ArrayOf") && unicode.IsUpper(rune(name[0])) {
+				types[name] = goType
+			}
+		}
+		if len(types) > 0 {
+			ret[namespace] = types
+		}
 	}
-
-	err = g.writeFile("typesresolver_", g.wsdl.TargetNamespace, g.formatSource(data), "")
-
 	return
 }
 
